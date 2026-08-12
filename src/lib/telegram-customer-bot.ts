@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getConfiguredAppUrl } from "@/lib/app-url";
 import {
   getTelegramBotUsername,
   getTelegramWebAppUrl,
@@ -16,7 +17,7 @@ function sendTelegramMessage(
 }
 
 function appBaseUrl() {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  return getConfiguredAppUrl();
 }
 
 /** Mijoz ilova havolasi — Telegram tugmasi uchun absolute URL */

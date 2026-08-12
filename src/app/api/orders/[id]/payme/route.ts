@@ -16,7 +16,8 @@ export async function POST(
   }
 
   const body = (await request.json().catch(() => ({}))) as { returnUrl?: string };
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin;
+  const { getConfiguredAppUrl } = await import("@/lib/app-url");
+  const base = getConfiguredAppUrl() || request.nextUrl.origin;
   const returnUrl =
     body.returnUrl ??
     `${base}/c/${order.cafe.slug}/app?paid=${order.id}`;

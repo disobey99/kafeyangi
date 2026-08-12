@@ -444,7 +444,8 @@ export async function POST(request: NextRequest) {
 
     let paymeCheckoutUrl: string | undefined;
     if (data.payWithPayme && cafe.paymeEnabled) {
-      const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
+      const { getConfiguredAppUrl } = await import("@/lib/app-url");
+      const base = getConfiguredAppUrl();
       const payme = await createPaymeCheckoutForOrder(
         order.id,
         `${base}/c/${cafe.slug}/app?paid=${order.id}`,

@@ -5,56 +5,58 @@ import { requireCafeStaff } from "@/lib/cafe-access";
 import { publishCafeEvent } from "@/lib/realtime";
 import { touchChatPresence } from "@/lib/chat-presence";
 
-function cuidLike() {
-  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-}
-
 const schema = z.object({
   messageIds: z.array(z.string().min(1)).min(1).max(100),
 });
 
-/** Xabarlarni o'qilgan deb belgilash */
+/** Xabarlarni o'qilgan deb belgilash — Postgres / SQLite mos */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ cafeId: string }> },
 ) {
-  const { cafeId } = await params;
-  const access = await requireCafeStaff(cafeId);
-  if (!access.ok) return access.response;
+  try {
+    const { cafeId } = await params;
+    const access = await requireCafeStaff(cafeId);
+    if (!access.ok) return access.response;
 
-  const { messageIds } = schema.parse(await request.json());
-  const userId = access.session.userId;
-  const userName = access.session.name;
+    const { messageIds } = schema.parse(await request.json());
+    const userId = access.session.userId;
+    const userName = access.session.name;
 
-  touchChatPresence(cafeId, userId, userName);
+    touchChatPresence(cafeId, userId, userName);
 
-  const marked: string[] = [];
-  for (const messageId of messageIds) {
-    const owned = await prisma.$queryRaw<Array<{ id: string; senderId: string }>>`
-      SELECT id, senderId FROM ChatMessage
-      WHERE id = ${messageId} AND cafeId = ${cafeId}
-      LIMIT 1
-    `;
-    if (!owned[0]) continue;
+    const owned = await prisma.chatMessage.findMany({
+      where: { cafeId, id: { in: messageIds } },
+      select: { id: true },
+    });
+    const ownedIds = owned.map((m) => m.id);
+    if (ownedIds.length === 0) {
+      return NextResponse.json({ ok: true, marked: [] });
+    }
 
-    await prisma.$executeRaw`
-      INSERT OR IGNORE INTO ChatMessageRead (id, messageId, userId, userName, readAt)
-      VALUES (${cuidLike()}, ${messageId}, ${userId}, ${userName}, CURRENT_TIMESTAMP)
-    `;
-    marked.push(messageId);
-  }
+    await prisma.chatMessageRead.createMany({
+      data: ownedIds.map((messageId) => ({
+        messageId,
+        userId,
+        userName,
+      })),
+      skipDuplicates: true,
+    });
 
-  if (marked.length > 0) {
-    const reads = await prisma.$queryRawUnsafe<
-      Array<{ messageId: string; userId: string; userName: string; readAt: string | Date }>
-    >(
-      `SELECT messageId, userId, userName, readAt FROM ChatMessageRead WHERE messageId IN (${marked.map(() => "?").join(",")}) ORDER BY readAt ASC`,
-      ...marked,
-    );
+    const reads = await prisma.chatMessageRead.findMany({
+      where: { messageId: { in: ownedIds } },
+      orderBy: { readAt: "asc" },
+      select: {
+        messageId: true,
+        userId: true,
+        userName: true,
+        readAt: true,
+      },
+    });
 
     const byMsg: Record<
       string,
-      Array<{ userId: string; userName: string; readAt: string | Date }>
+      Array<{ userId: string; userName: string; readAt: Date }>
     > = {};
     for (const r of reads) {
       (byMsg[r.messageId] ??= []).push({
@@ -68,7 +70,16 @@ export async function POST(
       type: "ops.chat.read",
       payload: { byMsg, readerId: userId, readerName: userName },
     });
-  }
 
-  return NextResponse.json({ ok: true, marked });
+    return NextResponse.json({ ok: true, marked: ownedIds });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: err.issues[0]?.message ?? "Noto'g'ri ma'lumot" },
+        { status: 400 },
+      );
+    }
+    console.error("chat read POST:", err);
+    return NextResponse.json({ error: "O'qilgan deb belgilash xatosi" }, { status: 500 });
+  }
 }

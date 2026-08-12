@@ -107,7 +107,8 @@ export async function GET(
   if (!access.ok) return access.response;
 
   const cafe = await prisma.cafe.findUnique({ where: { id: cafeId } });
-  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const { getConfiguredAppUrl } = await import("@/lib/app-url");
+  const baseUrl = getConfiguredAppUrl();
   const botUsername = await getTelegramBotUsername();
   const planCtx = await getCafePlanContext(cafeId);
   const canUseDomain = !!planCtx?.config.features.customDomain;

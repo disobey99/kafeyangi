@@ -71,12 +71,19 @@ if (!customerToken) {
   process.exit(1);
 }
 
-const base =
-  (process.argv[2] || env.TELEGRAM_WEBHOOK_BASE || env.NEXT_PUBLIC_APP_URL || "")
-    .replace(/\/$/, "");
+function normalizeBase(raw) {
+  const t = (raw || "").trim().replace(/\/$/, "");
+  if (!t) return "";
+  if (/^https?:\/\//i.test(t)) return t;
+  return `https://${t}`;
+}
+
+const base = normalizeBase(
+  process.argv[2] || env.TELEGRAM_WEBHOOK_BASE || env.NEXT_PUBLIC_APP_URL || "",
+);
 if (!base) {
   console.error(
-    "HTTPS manzil kerak.\nMasalan: node scripts/setup-telegram-webhook.mjs https://xxxx.trycloudflare.com",
+    "HTTPS manzil kerak.\nMasalan: node scripts/setup-telegram-webhook.mjs https://kafeyangi-avk6.vercel.app",
   );
   process.exit(1);
 }

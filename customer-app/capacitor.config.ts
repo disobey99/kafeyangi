@@ -28,12 +28,12 @@ loadLocalEnv();
  * Mijoz / kuryer APK — onlayn PWA ni WebView da ochadi.
  *
  * Muhit:
- *   CUSTOMER_APP_URL=https://domeningiz/c/KAFE-SLUG/app
+ *   CUSTOMER_APP_URL=https://kafeyangi-avk6.vercel.app/m
  * Kuryer uchun:
- *   CUSTOMER_APP_URL=https://domeningiz/c/KAFE-SLUG/app?mode=courier
+ *   CUSTOMER_APP_URL=https://kafeyangi-avk6.vercel.app/c/KAFE-SLUG/app?mode=courier
  */
 const serverUrl =
-  process.env.CUSTOMER_APP_URL || "https://example.com/c/demo/app";
+  process.env.CUSTOMER_APP_URL || "https://kafeyangi-avk6.vercel.app/m";
 
 const cleartext = serverUrl.startsWith("http://");
 

@@ -67,9 +67,23 @@ export function StaffGroupChat({
   }, []);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/cafes/${cafeId}/chat`);
+    const res = await fetch(`/api/cafes/${cafeId}/chat`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return;
+    if (res.status === 401) {
+      setError(
+        data.error ??
+          "Sessiya tugagan. Qayta kiring (AUTH_SECRET o'zgargan bo'lishi mumkin).",
+      );
+      return;
+    }
+    if (!res.ok) {
+      setError(data.error ?? "Chat yuklanmadi");
+      return;
+    }
+    setError("");
     const next = (data.messages ?? []) as GroupChatMessage[];
     knownIds.current = new Set(next.map((m) => m.id));
     setMessages(next);
@@ -86,6 +100,7 @@ export function StaffGroupChat({
       if (unique.length === 0) return;
       await fetch(`/api/cafes/${cafeId}/chat/read`, {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageIds: unique }),
       }).catch(() => {});
@@ -97,6 +112,7 @@ export function StaffGroupChat({
     async (typingFlag = false) => {
       await fetch(`/api/cafes/${cafeId}/chat/typing`, {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ typing: typingFlag }),
       }).catch(() => {});
@@ -189,6 +205,7 @@ export function StaffGroupChat({
     try {
       const res = await fetch(`/api/cafes/${cafeId}/chat`, {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: trimmed,
@@ -196,6 +213,13 @@ export function StaffGroupChat({
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setError(
+          data.error ??
+            "Sessiya tugagan. Qayta kiring (AUTH_SECRET o'zgargan bo'lishi mumkin).",
+        );
+        return;
+      }
       if (!res.ok) {
         setError(data.error ?? "Yuborib bo'lmadi");
         return;

@@ -1,3 +1,5 @@
+import { getConfiguredAppUrl } from "@/lib/app-url";
+
 export type TelegramInlineButton =
   | { text: string; web_app: { url: string } }
   | { text: string; url: string }
@@ -134,9 +136,9 @@ export function getPlatformSupportTelegramChatId(): string | null {
   return id || null;
 }
 
-/** Telegram Mini App — PWA bilan bir xil ilova (faqat HTTPS public URL) */
+/** Telegram Mini App — ilova (faqat HTTPS public URL) */
 export function getTelegramWebAppUrl(slug: string): string {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const base = getConfiguredAppUrl();
   if (!base.startsWith("https://")) return "";
   return `${base}/c/${slug}/app?src=tg`;
 }

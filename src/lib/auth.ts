@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
 import { GlobalRole } from "@prisma/client";
+import { getConfiguredAppUrl } from "@/lib/app-url";
 import { countTrustedDevices, isTrustedDevice } from "@/lib/device-login";
 import { isDeviceLoginApprovalEnabled } from "@/lib/device-login-config";
 
@@ -19,7 +20,7 @@ function getSecret() {
 
 /** HTTP da Secure cookie brauzer tomonidan rad etiladi — URL ga qarab. */
 export function sessionCookieSecure(): boolean {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = getConfiguredAppUrl();
   if (appUrl.startsWith("https://")) return true;
   if (appUrl.startsWith("http://")) return false;
   if (process.env.VERCEL) return true;
@@ -58,7 +59,12 @@ export async function verifySessionToken(
   token: string,
 ): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, getSecret());
+    const secret = process.env.AUTH_SECRET;
+    if (!secret || secret.length < 32) {
+      console.error("AUTH_SECRET missing or too short — session invalid");
+      return null;
+    }
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
     return {
       userId: payload.userId as string,
       email: payload.email as string,
@@ -67,6 +73,7 @@ export async function verifySessionToken(
       deviceId: typeof payload.deviceId === "string" ? payload.deviceId : undefined,
     };
   } catch {
+    // AUTH_SECRET o'zgargan yoki token muddati o'tgan
     return null;
   }
 }

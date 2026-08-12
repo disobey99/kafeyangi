@@ -9,104 +9,71 @@ import {
   touchChatPresence,
 } from "@/lib/chat-presence";
 
-type MsgRow = {
-  id: string;
-  cafeId: string;
-  senderId: string;
-  senderName: string;
-  text: string;
-  replyToId: string | null;
-  createdAt: string | Date;
-  replySenderName: string | null;
-  replyText: string | null;
-};
-
-type ReadRow = {
-  messageId: string;
-  userId: string;
-  userName: string;
-  readAt: string | Date;
-};
-
-function cuidLike() {
-  return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-}
-
 async function loadMessages(cafeId: string) {
-  const rows = await prisma.$queryRaw<MsgRow[]>`
-    SELECT
-      m.id, m.cafeId, m.senderId, m.senderName, m.text, m.replyToId, m.createdAt,
-      r.senderName AS replySenderName,
-      r.text AS replyText
-    FROM ChatMessage m
-    LEFT JOIN ChatMessage r ON r.id = m.replyToId
-    WHERE m.cafeId = ${cafeId}
-    ORDER BY m.createdAt DESC
-    LIMIT 100
-  `;
-  const messages = rows.reverse();
-  if (messages.length === 0) return [];
-
-  const ids = messages.map((m) => m.id);
-  const placeholders = ids.map(() => "?").join(",");
-  const reads = await prisma.$queryRawUnsafe<ReadRow[]>(
-    `SELECT messageId, userId, userName, readAt FROM ChatMessageRead WHERE messageId IN (${placeholders}) ORDER BY readAt ASC`,
-    ...ids,
-  );
-
-  const byMsg = new Map<string, ReadRow[]>();
-  for (const r of reads) {
-    const list = byMsg.get(r.messageId) ?? [];
-    list.push(r);
-    byMsg.set(r.messageId, list);
-  }
-
-  return messages.map((m) => {
-    const msgReads = byMsg.get(m.id) ?? [];
-    return {
-      id: m.id,
-      cafeId: m.cafeId,
-      senderId: m.senderId,
-      senderName: m.senderName,
-      text: m.text,
-      replyToId: m.replyToId,
-      createdAt: m.createdAt,
-      replyTo: m.replyToId
-        ? {
-            id: m.replyToId,
-            senderName: m.replySenderName ?? "Xodim",
-            text: m.replyText ?? "",
-          }
-        : null,
-      reads: msgReads.map((r) => ({
-        userId: r.userId,
-        userName: r.userName,
-        readAt: r.readAt,
-      })),
-      readCount: msgReads.length,
-    };
+  const rows = await prisma.chatMessage.findMany({
+    where: { cafeId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: {
+      replyTo: { select: { id: true, senderName: true, text: true } },
+      reads: {
+        orderBy: { readAt: "asc" },
+        select: { userId: true, userName: true, readAt: true },
+      },
+    },
   });
+
+  return rows.reverse().map((m) => ({
+    id: m.id,
+    cafeId: m.cafeId,
+    senderId: m.senderId,
+    senderName: m.senderName,
+    text: m.text,
+    replyToId: m.replyToId,
+    createdAt: m.createdAt,
+    replyTo: m.replyTo
+      ? {
+          id: m.replyTo.id,
+          senderName: m.replyTo.senderName,
+          text: m.replyTo.text,
+        }
+      : null,
+    reads: m.reads.map((r) => ({
+      userId: r.userId,
+      userName: r.userName,
+      readAt: r.readAt,
+    })),
+    readCount: m.reads.length,
+  }));
 }
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ cafeId: string }> },
 ) {
-  const { cafeId } = await params;
-  const access = await requireCafeStaff(cafeId);
-  if (!access.ok) return access.response;
+  try {
+    const { cafeId } = await params;
+    const access = await requireCafeStaff(cafeId);
+    if (!access.ok) return access.response;
 
-  touchChatPresence(cafeId, access.session.userId, access.session.name);
-  const messages = await loadMessages(cafeId);
-  const online = listChatOnline(cafeId);
-  const typing = listChatTyping(cafeId, access.session.userId);
+    touchChatPresence(cafeId, access.session.userId, access.session.name);
+    const messages = await loadMessages(cafeId);
+    const online = listChatOnline(cafeId);
+    const typing = listChatTyping(cafeId, access.session.userId);
 
-  publishCafeEvent(cafeId, {
-    type: "ops.chat.presence",
-    payload: { online },
-  });
+    publishCafeEvent(cafeId, {
+      type: "ops.chat.presence",
+      payload: { online },
+    });
 
-  return NextResponse.json({ messages, online, typing });
+    return NextResponse.json({ messages, online, typing });
+  } catch (err) {
+    console.error("chat GET:", err);
+    return NextResponse.json(
+      { error: "Chat yuklanmadi. Qayta kiring yoki sahifani yangilang." },
+      { status: 500 },
+    );
+  }
 }
 
 const schema = z.object({
@@ -118,58 +85,90 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ cafeId: string }> },
 ) {
-  const { cafeId } = await params;
-  const access = await requireCafeStaff(cafeId);
-  if (!access.ok) return access.response;
+  try {
+    const { cafeId } = await params;
+    const access = await requireCafeStaff(cafeId);
+    if (!access.ok) return access.response;
 
-  const input = schema.parse(await request.json());
-  const id = cuidLike();
-  const replyToId = input.replyToId ?? null;
+    const input = schema.parse(await request.json());
+    const replyToId = input.replyToId ?? null;
 
-  if (replyToId) {
-    const parent = await prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM ChatMessage WHERE id = ${replyToId} AND cafeId = ${cafeId} LIMIT 1
-    `;
-    if (!parent[0]) {
-      return NextResponse.json({ error: "Javob xabari topilmadi" }, { status: 400 });
+    if (replyToId) {
+      const parent = await prisma.chatMessage.findFirst({
+        where: { id: replyToId, cafeId },
+        select: { id: true },
+      });
+      if (!parent) {
+        return NextResponse.json(
+          { error: "Javob xabari topilmadi" },
+          { status: 400 },
+        );
+      }
     }
+
+    const created = await prisma.chatMessage.create({
+      data: {
+        cafeId,
+        senderId: access.session.userId,
+        senderName: access.session.name,
+        text: input.text.trim(),
+        replyToId,
+        reads: {
+          create: {
+            userId: access.session.userId,
+            userName: access.session.name,
+          },
+        },
+      },
+      include: {
+        replyTo: { select: { id: true, senderName: true, text: true } },
+        reads: {
+          select: { userId: true, userName: true, readAt: true },
+        },
+      },
+    });
+
+    const message = {
+      id: created.id,
+      cafeId: created.cafeId,
+      senderId: created.senderId,
+      senderName: created.senderName,
+      text: created.text,
+      replyToId: created.replyToId,
+      createdAt: created.createdAt,
+      replyTo: created.replyTo
+        ? {
+            id: created.replyTo.id,
+            senderName: created.replyTo.senderName,
+            text: created.replyTo.text,
+          }
+        : null,
+      reads: created.reads.map((r) => ({
+        userId: r.userId,
+        userName: r.userName,
+        readAt: r.readAt,
+      })),
+      readCount: created.reads.length,
+    };
+
+    touchChatPresence(cafeId, access.session.userId, access.session.name);
+    publishCafeEvent(cafeId, {
+      type: "ops.chat.created",
+      payload: { message },
+    });
+
+    return NextResponse.json({ message });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: err.issues[0]?.message ?? "Noto'g'ri ma'lumot" },
+        { status: 400 },
+      );
+    }
+    console.error("chat POST:", err);
+    return NextResponse.json(
+      { error: "Xabar yuborilmadi. Qayta kiring yoki sahifani yangilang." },
+      { status: 500 },
+    );
   }
-
-  await prisma.$executeRaw`
-    INSERT INTO ChatMessage (id, cafeId, senderId, senderName, text, replyToId, createdAt)
-    VALUES (
-      ${id},
-      ${cafeId},
-      ${access.session.userId},
-      ${access.session.name},
-      ${input.text},
-      ${replyToId},
-      CURRENT_TIMESTAMP
-    )
-  `;
-
-  // Sender o'z xabarini o'qigan hisoblanadi
-  await prisma.$executeRaw`
-    INSERT OR IGNORE INTO ChatMessageRead (id, messageId, userId, userName, readAt)
-    VALUES (${cuidLike()}, ${id}, ${access.session.userId}, ${access.session.name}, CURRENT_TIMESTAMP)
-  `;
-
-  const messages = await loadMessages(cafeId);
-  const message = messages.find((m) => m.id === id) ?? {
-    id,
-    cafeId,
-    senderId: access.session.userId,
-    senderName: access.session.name,
-    text: input.text,
-    replyToId,
-    createdAt: new Date().toISOString(),
-    replyTo: null,
-    reads: [],
-    readCount: 1,
-  };
-
-  touchChatPresence(cafeId, access.session.userId, access.session.name);
-  publishCafeEvent(cafeId, { type: "ops.chat.created", payload: { message } });
-
-  return NextResponse.json({ message });
 }

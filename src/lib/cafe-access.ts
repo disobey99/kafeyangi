@@ -5,6 +5,24 @@ import { prisma } from "@/lib/prisma";
 
 const MANAGER_ROLES: CafeRole[] = [CafeRole.OWNER, CafeRole.MANAGER];
 
+const STAFF_ROLES: CafeRole[] = [
+  CafeRole.OWNER,
+  CafeRole.MANAGER,
+  CafeRole.CASHIER,
+  CafeRole.WAITER,
+  CafeRole.KITCHEN,
+  CafeRole.COURIER,
+];
+
+const UNAUTH = NextResponse.json(
+  {
+    error: "Sessiya tugagan yoki AUTH_SECRET o'zgargan. Qayta kiring.",
+    code: "UNAUTHORIZED",
+    reauth: true,
+  },
+  { status: 401 },
+);
+
 export async function getCafeMembership(userId: string, cafeId: string) {
   const cafe = await prisma.cafe.findUnique({
     where: { id: cafeId },
@@ -26,16 +44,18 @@ export async function getCafeMembership(userId: string, cafeId: string) {
 }
 
 type AccessResult =
-  | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getSession>>>; cafe: { id: string }; role: CafeRole }
+  | {
+      ok: true;
+      session: NonNullable<Awaited<ReturnType<typeof getSession>>>;
+      cafe: { id: string };
+      role: CafeRole;
+    }
   | { ok: false; response: NextResponse };
 
 export async function requireCafeManager(cafeId: string): Promise<AccessResult> {
   const session = await getSession();
   if (!session) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Kirish kerak" }, { status: 401 }),
-    };
+    return { ok: false, response: UNAUTH };
   }
 
   if (isSuperAdmin(session)) {
@@ -60,15 +80,19 @@ export async function requireCafeManager(cafeId: string): Promise<AccessResult> 
   if (!MANAGER_ROLES.includes(membership.role)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Faqat egasi yoki nazoratchi" }, { status: 403 }),
+      response: NextResponse.json(
+        { error: "Faqat egasi yoki nazoratchi" },
+        { status: 403 },
+      ),
     };
   }
 
-  // Update lastActiveAt asynchronously
-  prisma.cafeMember.update({
-    where: { cafeId_userId: { cafeId, userId: session.userId } },
-    data: { lastActiveAt: new Date() },
-  }).catch(() => {});
+  prisma.cafeMember
+    .update({
+      where: { cafeId_userId: { cafeId, userId: session.userId } },
+      data: { lastActiveAt: new Date() },
+    })
+    .catch(() => {});
 
   return {
     ok: true,
@@ -78,29 +102,21 @@ export async function requireCafeManager(cafeId: string): Promise<AccessResult> 
   };
 }
 
-const STAFF_ROLES: CafeRole[] = [
-  CafeRole.OWNER,
-  CafeRole.MANAGER,
-  CafeRole.CASHIER,
-  CafeRole.WAITER,
-  CafeRole.KITCHEN,
-  CafeRole.COURIER,
-];
-
 export async function requireCafeCourier(cafeId: string): Promise<AccessResult> {
-  return requireCafeStaff(cafeId, [CafeRole.COURIER, CafeRole.OWNER, CafeRole.MANAGER]);
+  return requireCafeStaff(cafeId, [
+    CafeRole.COURIER,
+    CafeRole.OWNER,
+    CafeRole.MANAGER,
+  ]);
 }
 
 export async function requireCafeStaff(
   cafeId: string,
-  roles: CafeRole[] = STAFF_ROLES
+  roles: CafeRole[] = STAFF_ROLES,
 ): Promise<AccessResult> {
   const session = await getSession();
   if (!session) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Kirish kerak" }, { status: 401 }),
-    };
+    return { ok: false, response: UNAUTH };
   }
 
   if (isSuperAdmin(session)) {
@@ -129,11 +145,12 @@ export async function requireCafeStaff(
     };
   }
 
-  // Update lastActiveAt asynchronously
-  prisma.cafeMember.update({
-    where: { cafeId_userId: { cafeId, userId: session.userId } },
-    data: { lastActiveAt: new Date() },
-  }).catch(() => {});
+  prisma.cafeMember
+    .update({
+      where: { cafeId_userId: { cafeId, userId: session.userId } },
+      data: { lastActiveAt: new Date() },
+    })
+    .catch(() => {});
 
   return {
     ok: true,
@@ -143,7 +160,12 @@ export async function requireCafeStaff(
   };
 }
 
-export async function requireProductAccess(productId: string): Promise<AccessResult & { productId: string } | { ok: false; response: NextResponse }> {
+export async function requireProductAccess(
+  productId: string,
+): Promise<
+  | (AccessResult & { ok: true; productId: string })
+  | { ok: false; response: NextResponse }
+> {
   const product = await prisma.product.findUnique({
     where: { id: productId },
     select: { id: true, cafeId: true },

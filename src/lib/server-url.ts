@@ -1,13 +1,16 @@
 import { headers } from "next/headers";
 import type { NextRequest } from "next/server";
+import { getConfiguredAppUrl } from "@/lib/app-url";
 
 function isLocalHostname(host: string) {
   return host === "localhost" || host === "127.0.0.1";
 }
 
+export { normalizeAppUrl, getConfiguredAppUrl } from "@/lib/app-url";
+
 /** .env dagi tarmoq (LAN) manzil — telefon QR uchun */
 function getNetworkEnvUrl(): string | null {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  const envUrl = getConfiguredAppUrl();
   if (!envUrl) return null;
   try {
     const host = new URL(envUrl).hostname;
@@ -30,7 +33,7 @@ export async function getServerBaseUrl(): Promise<string> {
     return `${proto}://${host}`;
   }
 
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  const envUrl = getConfiguredAppUrl();
   if (envUrl) return envUrl;
 
   if (host) return `${proto}://${host}`;
@@ -45,5 +48,5 @@ export function resolveBaseUrlFromRequest(request: NextRequest): string {
   const proto = request.headers.get("x-forwarded-proto") ?? "http";
   if (host) return `${proto}://${host}`;
 
-  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
+  return getConfiguredAppUrl() || "http://localhost:3000";
 }

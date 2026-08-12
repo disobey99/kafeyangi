@@ -857,8 +857,11 @@ export function CafeBrandLanding({
             <a
               className="mila-nook-badge"
               href={
-                (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "") ||
-                "/"
+                process.env.NEXT_PUBLIC_APP_URL
+                  ? process.env.NEXT_PUBLIC_APP_URL.startsWith("http")
+                    ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")
+                    : `https://${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}`
+                  : "https://kafeyangi-avk6.vercel.app"
               }
               target="_blank"
               rel="noopener noreferrer"

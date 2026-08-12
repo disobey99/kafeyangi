@@ -26,9 +26,9 @@ loadLocalEnv();
 /**
  * Xodimlar APK — saytni WebView ichida ochadi.
  *
- *   STAFF_APP_URL=https://domeningiz/login
+ *   STAFF_APP_URL=https://kafeyangi-avk6.vercel.app/m
  */
-const serverUrl = process.env.STAFF_APP_URL || "https://example.com/login";
+const serverUrl = process.env.STAFF_APP_URL || "https://kafeyangi-avk6.vercel.app/m";
 const cleartext = serverUrl.startsWith("http://");
 
 const config: CapacitorConfig = {
