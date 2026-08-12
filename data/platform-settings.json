@@ -1,0 +1,41 @@
+{
+  "companyName": "NOOKLINE",
+  "contactEmail": "info@kafesaas.uz",
+  "contactPhone": "+998 50 009 00 19",
+  "socialInstagram": "https://www.instagram.com/_rakhmonov_t?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw==",
+  "socialTelegram": "@id_0019",
+  "socialFacebook": "",
+  "notifyNewCustomer": true,
+  "notifyPaymentOverdue": true,
+  "notifyWeeklyReport": true,
+  "supportPhone": "",
+  "supportTelegram": "@id_0019",
+  "supportInstagram": "",
+  "supportTitle": "Qo'llab-quvvatlash",
+  "planCurrency": "UZS",
+  "planPrices": {
+    "STARTER": 99000,
+    "STANDARD": 199000,
+    "PRO": 399000
+  },
+  "planDiscounts": {
+    "STARTER": {
+      "enabled": false,
+      "percent": 0,
+      "validFrom": "",
+      "validTo": ""
+    },
+    "STANDARD": {
+      "enabled": false,
+      "percent": 7,
+      "validFrom": "2026-07-06",
+      "validTo": "2026-07-10"
+    },
+    "PRO": {
+      "enabled": false,
+      "percent": 0,
+      "validFrom": "",
+      "validTo": ""
+    }
+  }
+}

@@ -1,0 +1,957 @@
+﻿<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MILA — Coffee Bar | mila.nookline.uz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --paper: #faf9f6;
+      --paper-deep: #f1efe9;
+      --ink: #161513;
+      --muted: #716f68;
+      --red: #d1293d;
+      --red-deep: #a11d2e;
+      --line: #e3e0d8;
+      --display: "Archivo", system-ui, sans-serif;
+      --text: "Inter", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --space-1: 0.5rem;
+      --space-2: 1rem;
+      --space-3: 1.5rem;
+      --space-4: 2rem;
+      --space-5: 3rem;
+      --space-6: 4.5rem;
+      --radius: 2px;
+      --border: 2px solid var(--ink);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-height: 100vh; background: var(--paper);
+      color: var(--ink);
+      font-family: var(--text);
+      font-weight: 400;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; }
+    img { max-width: 100%; display: block; }
+
+    /* full-bleed site — no browser chrome */ .site { background: var(--paper); min-height: 100vh; }
+
+    /* ——— Shared UI ——— */
+    .wrap {
+      width: min(1040px, calc(100% - 2.5rem));
+      margin-inline: auto;
+    }
+    .eyebrow {
+      margin: 0 0 var(--space-2);
+      color: var(--red);
+      font-family: var(--display);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .display {
+      margin: 0;
+      font-family: var(--display);
+      font-weight: 900;
+      letter-spacing: -0.01em;
+      text-transform: uppercase;
+      line-height: 0.95;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.85rem;
+      padding: 0.65rem 1.2rem;
+      border: var(--border);
+      border-radius: var(--radius);
+      font-family: var(--display);
+      font-size: 0.82rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .btn-red {
+      background: var(--red);
+      border-color: var(--red);
+      color: #fff;
+    }
+    .btn-red:hover { background: var(--red-deep); border-color: var(--red-deep); }
+    .btn-ink {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: var(--paper);
+    }
+    .btn-ink:hover { background: #000; }
+    .btn-outline {
+      background: transparent;
+      color: var(--ink);
+    }
+    .btn-outline:hover { background: var(--ink); color: var(--paper); }
+    .btn-outline-light {
+      background: transparent;
+      border-color: rgba(250, 249, 246, 0.55);
+      color: var(--paper);
+    }
+    .btn-outline-light:hover {
+      background: var(--paper);
+      border-color: var(--paper);
+      color: var(--ink);
+    }
+
+    /* ——— Nav ——— */
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.1rem 0;
+      border-bottom: var(--border);
+    }
+    .logo {
+      font-family: var(--display);
+      font-size: 1.55rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+    }
+    .navlinks {
+      display: flex;
+      align-items: center;
+      gap: 1.35rem;
+      font-family: var(--display);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .navlinks a:hover { color: var(--red); }
+    .nav-actions { display: flex; align-items: center; gap: 0.55rem; }
+
+    /* ——— Hero ——— */
+    .hero {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: clamp(1.5rem, 4vw, 3rem);
+      align-items: center;
+      padding: var(--space-6) 0 var(--space-5);
+      border-bottom: var(--border);
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 6.2vw, 4.4rem);
+      max-width: 11ch;
+    }
+    .hero h1 .accent { color: var(--red); }
+    .hero-lead {
+      margin: var(--space-3) 0;
+      max-width: 34rem;
+      color: var(--muted);
+      font-size: 1.02rem;
+      line-height: 1.6;
+    }
+    .hero-cta { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+
+    /* Receipt card */
+    .receipt-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 0.5rem 0 1rem;
+    }
+    .receipt {
+      width: min(290px, 100%);
+      background: #fff;
+      border: var(--border);
+      padding: 1.15rem 1.05rem 1.35rem;
+      transform: rotate(-3deg);
+      box-shadow: 8px 12px 0 rgba(22, 21, 19, 0.08);
+      clip-path: polygon(
+        0% 0%, 100% 0%, 100% calc(100% - 12px),
+        96% 100%, 92% calc(100% - 12px), 88% 100%, 84% calc(100% - 12px),
+        80% 100%, 76% calc(100% - 12px), 72% 100%, 68% calc(100% - 12px),
+        64% 100%, 60% calc(100% - 12px), 56% 100%, 52% calc(100% - 12px),
+        48% 100%, 44% calc(100% - 12px), 40% 100%, 36% calc(100% - 12px),
+        32% 100%, 28% calc(100% - 12px), 24% 100%, 20% calc(100% - 12px),
+        16% 100%, 12% calc(100% - 12px), 8% 100%, 4% calc(100% - 12px),
+        0% 100%
+      );
+      font-family: var(--mono);
+      font-size: 0.72rem;
+    }
+    .receipt-brand {
+      text-align: center;
+      font-family: var(--display);
+      font-size: 1.15rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .receipt-meta {
+      margin: 0.35rem 0 0.85rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.68rem;
+    }
+    .receipt-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.28rem 0;
+      border-bottom: 1px dashed var(--line);
+    }
+    .receipt-total {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 0.55rem;
+      padding-top: 0.55rem;
+      border-top: 2px solid var(--ink);
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+    .receipt-qr {
+      margin: 0.9rem auto 0.45rem;
+      width: 72px;
+      height: 72px;
+    }
+    .receipt-foot {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.62rem;
+    }
+
+    /* ——— Sections ——— */
+    .section {
+      padding: var(--space-6) 0;
+      border-bottom: var(--border);
+    }
+    .section-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: var(--space-4);
+    }
+    .section-head h2 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+    }
+
+    /* Menu tabs + list */
+    .tabs {
+      display: inline-flex;
+      border: var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .tab {
+      padding: 0.65rem 1rem;
+      font-family: var(--display);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-right: var(--border);
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .tab:last-child { border-right: 0; }
+    .tab.is-active {
+      background: var(--ink);
+      color: var(--paper);
+    }
+    .menu-list { display: grid; gap: 0; }
+    .menu-item {
+      padding: 1.05rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .menu-item:last-child { border-bottom: 0; }
+    .menu-row {
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .menu-row .name { text-transform: uppercase; letter-spacing: 0.02em; }
+    .menu-row .dots {
+      flex: 1;
+      border-bottom: 1px dotted var(--muted);
+      transform: translateY(-0.25rem);
+      opacity: 0.55;
+    }
+    .menu-row .price { font-variant-numeric: tabular-nums; }
+    .menu-desc {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+      max-width: 42rem;
+    }
+
+    /* QR steps — dark + ticket stubs */
+    .qr-section {
+      background: var(--ink);
+      color: var(--paper);
+      border-bottom: var(--border);
+      padding: var(--space-6) 0;
+    }
+    .qr-section .eyebrow { color: var(--red); }
+    .qr-section h2 { color: var(--paper); }
+    .qr-section .lead {
+      margin: 0.75rem 0 0;
+      max-width: 34rem;
+      color: rgba(250, 249, 246, 0.68);
+    }
+    .stubs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-top: var(--space-4);
+    }
+    .stub {
+      position: relative;
+      background: var(--paper);
+      color: var(--ink);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 1.35rem 1.15rem 1.25rem;
+      overflow: hidden;
+    }
+    .stub::before,
+    .stub::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--ink);
+      transform: translateY(-50%);
+    }
+    .stub::before { left: -9px; }
+    .stub::after { right: -9px; }
+    .stub-num {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--red);
+      letter-spacing: 0.06em;
+    }
+    .stub h3 {
+      margin: 0.55rem 0 0.45rem;
+      font-family: var(--display);
+      font-size: 1.15rem;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+      text-transform: uppercase;
+    }
+    .stub p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    /* Gallery */
+    .gallery {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr 1fr;
+      grid-template-rows: 180px 140px;
+      gap: 0.65rem;
+    }
+    .g-cell {
+      position: relative;
+      border: var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      min-height: 120px;
+      display: flex;
+      align-items: flex-end;
+      padding: 0.85rem;
+    }
+    .g-cell span {
+      position: relative;
+      z-index: 1;
+      font-family: var(--display);
+      font-size: 0.85rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+      text-shadow: 0 1px 8px rgba(0,0,0,0.35);
+    }
+    .g-cell small {
+      position: absolute;
+      top: 0.55rem;
+      right: 0.55rem;
+      z-index: 1;
+      font-family: var(--mono);
+      font-size: 0.58rem;
+      color: rgba(255,255,255,0.75);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .g1 { grid-row: 1 / 3; background: linear-gradient(145deg, #2a211c, #6b3a2e 55%, #c45a3a); }
+    .g2 { background: linear-gradient(160deg, #1c2428, #3d5a4a 60%, #8fbc8f); }
+    .g3 { background: linear-gradient(150deg, #1a1a22, #4a3f6b 50%, #d1293d); }
+    .g4 { background: linear-gradient(140deg, #222018, #5c4a28, #c4a35a); }
+    .g5 { background: linear-gradient(155deg, #101820, #2c4a5e, #7eb6d4); }
+
+    /* Hours + stamp */
+    .place-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(1.5rem, 4vw, 3rem);
+      align-items: start;
+    }
+    .hours-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.7rem 0;
+      border-bottom: 1px dashed var(--line);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+    }
+    .hours-row:last-child { border-bottom: 0; }
+    .hours-row .day { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    .hours-row .time { color: var(--muted); }
+    .stamp-block {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1.25rem;
+    }
+    .stamp {
+      width: 148px;
+      height: 148px;
+      border: 3px solid var(--red);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--red);
+      transform: rotate(-12deg);
+      font-family: var(--display);
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.1;
+      box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--red) 35%, transparent);
+    }
+    .stamp strong { font-size: 1.05rem; }
+    .stamp em {
+      display: block;
+      margin-top: 0.2rem;
+      font-style: normal;
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+    }
+    .addr-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.55;
+      max-width: 22rem;
+    }
+    .addr-copy b { color: var(--ink); }
+
+    /* Reviews */
+    .reviews {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+    .quote {
+      border: var(--border);
+      border-radius: var(--radius);
+      background: var(--paper-deep);
+      padding: 1.25rem;
+    }
+    .quote p {
+      margin: 0;
+      font-family: var(--display);
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      text-transform: uppercase;
+      line-height: 1.2;
+    }
+    .quote cite {
+      display: block;
+      margin-top: 1rem;
+      font-family: var(--mono);
+      font-style: normal;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Install app */
+    .install {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 1.5rem;
+      align-items: center;
+      background: var(--paper-deep);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: clamp(1.25rem, 3vw, 2rem);
+    }
+    .install h2 { font-size: clamp(1.6rem, 3.5vw, 2.2rem); }
+    .install p {
+      margin: 0.75rem 0 0;
+      color: var(--muted);
+      max-width: 32rem;
+    }
+    .install-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      margin-top: 1.25rem;
+    }
+    .phone-mock {
+      justify-self: end;
+      width: min(220px, 100%);
+      border: var(--border);
+      border-radius: 18px;
+      background: #fff;
+      padding: 0.7rem 0.7rem 1rem;
+      box-shadow: 6px 8px 0 rgba(22, 21, 19, 0.08);
+    }
+    .phone-bar {
+      height: 8px;
+      width: 42%;
+      margin: 0.15rem auto 0.7rem;
+      border-radius: 99px;
+      background: var(--line);
+    }
+    .phone-screen {
+      border: 2px solid var(--ink);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 0.75rem;
+      min-height: 160px;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+    }
+    .phone-screen .ttl {
+      font-family: var(--display);
+      font-weight: 900;
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 0.55rem;
+    }
+    .phone-screen .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.28rem 0;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    /* Footer */
+    .footer {
+      padding: var(--space-5) 0 var(--space-3);
+    }
+    .footer-top {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 2rem;
+      padding-bottom: var(--space-4);
+      border-bottom: var(--border);
+    }
+    .footer-desc {
+      margin: 0.75rem 0 0;
+      color: var(--muted);
+      max-width: 28rem;
+      font-size: 0.95rem;
+    }
+    .footer-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    .footer-cols h4 {
+      margin: 0 0 0.7rem;
+      font-family: var(--display);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .footer-cols a {
+      display: block;
+      color: var(--muted);
+      font-size: 0.92rem;
+      padding: 0.2rem 0;
+    }
+    .footer-cols a:hover { color: var(--red); }
+    .footer-bottom {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.85rem;
+      padding-top: var(--space-3);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .nook-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.45rem 0.7rem;
+      background: var(--ink);
+      color: var(--paper);
+      border-radius: var(--radius);
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .nook-badge i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      display: inline-block;
+    }
+
+    /* QR canvas helper */
+    .qr-canvas {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      gap: 1px;
+      background: var(--ink);
+      padding: 2px;
+      width: 100%;
+      height: 100%;
+      aspect-ratio: 1;
+    }
+    .qr-canvas i {
+      background: #fff;
+      display: block;
+      min-height: 0;
+    }
+    .qr-canvas i.on { background: var(--ink); }
+
+    @media (max-width: 880px) {
+      .chrome { grid-template-columns: auto 1fr; }
+      .tab-preview { display: none; }
+      .navlinks { display: none; }
+      .hero { grid-template-columns: 1fr; padding-top: var(--space-4); }
+      .receipt-wrap { order: -1; }
+      .receipt { transform: rotate(-1.5deg); }
+      .stubs { grid-template-columns: 1fr; }
+      .gallery {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto;
+      }
+      .g1 { grid-row: auto; min-height: 180px; }
+      .place-grid,
+      .reviews,
+      .install,
+      .footer-top { grid-template-columns: 1fr; }
+      .phone-mock { justify-self: start; }
+      .wrap { width: min(1040px, calc(100% - 1.5rem)); }
+      .tabs { width: 100%; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="site">
+        <div class="wrap">
+          <nav class="nav" aria-label="Asosiy">
+            <a class="logo" href="#top">MILA</a>
+            <div class="navlinks">
+              <a href="#menu">Menyu</a>
+              <a href="#space">Makon</a>
+              <a href="#place">Manzil</a>
+              <a href="#contact">Aloqa</a>
+            </div>
+            <div class="nav-actions">
+              <a class="btn btn-ink" href="#order">Buyurtma</a>
+            </div>
+          </nav>
+
+          <header class="hero" id="top">
+            <div>
+              <p class="eyebrow">Toshkent, Mirzo Ulug‘bek</p>
+              <h1 class="display">Toza ta’m. <span class="accent">Tezkor buyurtma.</span></h1>
+              <p class="hero-lead">
+                MILA Coffee Bar — specialty kofe va tezkor QR buyurtma. Stolingizdan skanerlab,
+                navbatsiz buyurtma bering. NOOKLINE platformasida avtomatik yaratilgan subdomen sayt.
+              </p>
+              <div class="hero-cta">
+                <a class="btn btn-red" href="#order">Buyurtma berish</a>
+                <a class="btn btn-outline" href="#menu">Menyu</a>
+              </div>
+            </div>
+            <div class="receipt-wrap">
+              <aside class="receipt" aria-label="Namuna chek">
+                <div class="receipt-brand">MILA</div>
+                <div class="receipt-meta">Coffee Bar · Stol #12<br />2026-08-03 · 18:24</div>
+                <div class="receipt-line"><span>Espresso</span><span>18 000</span></div>
+                <div class="receipt-line"><span>Cappuccino</span><span>28 000</span></div>
+                <div class="receipt-line"><span>Croissant</span><span>22 000</span></div>
+                <div class="receipt-total"><span>JAMI</span><span>68 000</span></div>
+                <div class="receipt-qr"><div class="qr-canvas" data-qr></div></div>
+                <div class="receipt-foot">mila.nookline.uz</div>
+              </aside>
+            </div>
+          </header>
+
+          <section class="section" id="menu">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Menyu</p>
+                <h2 class="display">Bugungi ta’mlar</h2>
+              </div>
+              <div class="tabs" role="tablist" aria-label="Menyu bo‘limlari">
+                <button class="tab is-active" type="button" data-tab>Issiq</button>
+                <button class="tab" type="button" data-tab>Sovuq</button>
+                <button class="tab" type="button" data-tab>Nonushta</button>
+                <button class="tab" type="button" data-tab>Shirinlik</button>
+              </div>
+            </div>
+            <div class="menu-list">
+              <article class="menu-item">
+                <div class="menu-row"><span class="name">Espresso</span><span class="dots"></span><span class="price">18 000</span></div>
+                <p class="menu-desc">Qalin crema, toza shot — kunlik blend.</p>
+              </article>
+              <article class="menu-item">
+                <div class="menu-row"><span class="name">Cappuccino</span><span class="dots"></span><span class="price">28 000</span></div>
+                <p class="menu-desc">1:1:1 balans, velvet sut ko‘pigi.</p>
+              </article>
+              <article class="menu-item">
+                <div class="menu-row"><span class="name">Flat White</span><span class="dots"></span><span class="price">30 000</span></div>
+                <p class="menu-desc">Ikki shot, yupqa mikroko‘pik.</p>
+              </article>
+              <article class="menu-item">
+                <div class="menu-row"><span class="name">Mokka</span><span class="dots"></span><span class="price">32 000</span></div>
+                <p class="menu-desc">Qora shokolad + espresso.</p>
+              </article>
+              <article class="menu-item">
+                <div class="menu-row"><span class="name">Filtr kofe</span><span class="dots"></span><span class="price">26 000</span></div>
+                <p class="menu-desc">V60 / batch brew — haftalik single origin.</p>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <section class="qr-section" id="order">
+          <div class="wrap">
+            <p class="eyebrow">QR buyurtma</p>
+            <h2 class="display">Uch qadam. Navbatsiz.</h2>
+            <p class="lead">Stol QR-kodini skanerlang — menyu ochiladi, to‘lov va oshxona bir tizimda.</p>
+            <div class="stubs">
+              <article class="stub">
+                <div class="stub-num">01</div>
+                <h3>Skanerlang</h3>
+                <p>Stoldagi QR orqali MILA ilovasiga kirasiz — telefoningizdan.</p>
+              </article>
+              <article class="stub">
+                <div class="stub-num">02</div>
+                <h3>Tanlang</h3>
+                <p>Issiq, sovuq yoki nonushta — savatni to‘ldiring, stol avtomatik birikadi.</p>
+              </article>
+              <article class="stub">
+                <div class="stub-num">03</div>
+                <h3>To‘lang</h3>
+                <p>Onlayn yoki kassada. Buyurtma oshxonaga darhol yetib boradi.</p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <div class="wrap">
+          <section class="section" id="space">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Makon</p>
+                <h2 class="display">Ichki muhit</h2>
+              </div>
+            </div>
+            <div class="gallery" aria-label="Galereya — illyustrativ bloklar">
+              <div class="g-cell g1"><small>Illyustrativ blok</small><span>Bar zonasi</span></div>
+              <div class="g-cell g2"><small>Illyustrativ blok</small><span>Qovurish</span></div>
+              <div class="g-cell g3"><small>Illyustrativ blok</small><span>O‘tirish joyi</span></div>
+              <div class="g-cell g4"><small>Illyustrativ blok</small><span>Vitrina</span></div>
+              <div class="g-cell g5"><small>Illyustrativ blok</small><span>Terassa</span></div>
+            </div>
+          </section>
+
+          <section class="section" id="place">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Manzil</p>
+                <h2 class="display">Qachon kelasiz?</h2>
+              </div>
+            </div>
+            <div class="place-grid">
+              <div>
+                <div class="hours-row"><span class="day">Du–Ju</span><span class="time">08:00 – 22:00</span></div>
+                <div class="hours-row"><span class="day">Shanba</span><span class="time">09:00 – 23:00</span></div>
+                <div class="hours-row"><span class="day">Yakshanba</span><span class="time">09:00 – 21:00</span></div>
+              </div>
+              <div class="stamp-block">
+                <div class="stamp" aria-hidden="true">
+                  <div>
+                    <strong>Ochiq<br />hozir</strong>
+                    <em>Open</em>
+                  </div>
+                </div>
+                <p class="addr-copy">
+                  <b>Mirzo Ulug‘bek tumani, Toshkent</b><br />
+                  MILA Coffee Bar · metro yaqinida<br />
+                  Aloqa: +998 90 000 00 00
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="section" id="reviews">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Fikrlar</p>
+                <h2 class="display">Mijozlar nima deydi</h2>
+              </div>
+            </div>
+            <div class="reviews">
+              <blockquote class="quote">
+                <p>“QR bilan buyurtma — navbat yo‘q, kofe issiq keladi.”</p>
+                <cite>Dilnoza A.</cite>
+              </blockquote>
+              <blockquote class="quote">
+                <p>“Flat white ideal. Makon tinch, ishlash uchun zo‘r.”</p>
+                <cite>Jasur K.</cite>
+              </blockquote>
+              <blockquote class="quote">
+                <p>“Ilovani o‘rnatdim — ertaga yana shu yerdaman.”</p>
+                <cite>Madina R.</cite>
+              </blockquote>
+            </div>
+          </section>
+
+          <section class="section" id="app">
+            <div class="install">
+              <div>
+                <p class="eyebrow">Ilova</p>
+                <h2 class="display">Ilovani yuklab oling</h2>
+                <p>
+                  MILA buyurtma ilovasi — telefoningizga o‘rnating. Tezkor menyu, stol buyurtmasi
+                  va yangiliklar bir joyda. App Store / Play emas: brauzerdan PWA sifatida.
+                </p>
+                <div class="install-actions">
+                  <a class="btn btn-red" href="#order">Ilovani ochish</a>
+                  <a class="btn btn-outline" href="#order">Buyurtma berish</a>
+                </div>
+              </div>
+              <div class="phone-mock" aria-hidden="true">
+                <div class="phone-bar"></div>
+                <div class="phone-screen">
+                  <div class="ttl">MILA</div>
+                  <div class="row"><span>Cappuccino</span><span>28k</span></div>
+                  <div class="row"><span>Filtr</span><span>26k</span></div>
+                  <div class="row"><span>Stol #12</span><span>OK</span></div>
+                  <div style="margin-top:0.7rem;text-align:center;opacity:0.7;">mila.nookline.uz/app</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <footer class="footer" id="contact">
+            <div class="footer-top">
+              <div>
+                <div class="logo">MILA</div>
+                <p class="footer-desc">
+                  Specialty coffee bar. QR buyurtma va kassa — NOOKLINE bilan birgalikda.
+                </p>
+              </div>
+              <div class="footer-cols">
+                <div>
+                  <h4>Sayt</h4>
+                  <a href="#menu">Menyu</a>
+                  <a href="#space">Makon</a>
+                  <a href="#order">Buyurtma</a>
+                  <a href="#app">Ilova</a>
+                </div>
+                <div>
+                  <h4>Aloqa</h4>
+                  <a href="tel:+998900000000">+998 90 000 00 00</a>
+                  <a href="mailto:hello@mila.uz">hello@mila.uz</a>
+                  <a href="#place">Manzil</a>
+                </div>
+              </div>
+            </div>
+            <div class="footer-bottom">
+              <span>© 2026 MILA Coffee Bar</span>
+              <span class="nook-badge"><i></i> Ushbu sayt NOOKLINE platformasida yaratilgan</span>
+            </div>
+          </footer>
+        </div>
+      </div>
+
+  <script>
+    (function () {
+      function paintQr(root) {
+        root.innerHTML = "";
+        var size = 9;
+        var cells = [];
+        for (var y = 0; y < size; y++) {
+          for (var x = 0; x < size; x++) {
+            cells.push({ x: x, y: y, on: false });
+          }
+        }
+        function finder(ox, oy) {
+          for (var y = 0; y < 3; y++) {
+            for (var x = 0; x < 3; x++) {
+              var edge = x === 0 || y === 0 || x === 2 || y === 2;
+              var center = x === 1 && y === 1;
+              var i = (oy + y) * size + (ox + x);
+              cells[i].on = edge || center;
+            }
+          }
+        }
+        finder(0, 0);
+        finder(6, 0);
+        finder(0, 6);
+        for (var i = 0; i < cells.length; i++) {
+          var c = cells[i];
+          var inFinder =
+            (c.x < 3 && c.y < 3) ||
+            (c.x > 5 && c.y < 3) ||
+            (c.x < 3 && c.y > 5);
+          if (!inFinder) c.on = Math.random() < 0.43;
+          var el = document.createElement("i");
+          if (c.on) el.className = "on";
+          root.appendChild(el);
+        }
+      }
+
+      document.querySelectorAll("[data-qr]").forEach(paintQr);
+
+      document.querySelectorAll("[data-tab]").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          document.querySelectorAll("[data-tab]").forEach(function (t) {
+            t.classList.remove("is-active");
+          });
+          tab.classList.add("is-active");
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

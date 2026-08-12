@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env
+.env.local
+*.db
+*.db-journal
+terminals
+.cursor
+README.md
+Dockerfile
+docker-compose.yml

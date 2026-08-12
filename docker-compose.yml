@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kafe
+      POSTGRES_PASSWORD: kafe_secret
+      POSTGRES_DB: kafe_saas
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kafe -d kafe_saas"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://kafe:kafe_secret@postgres:5432/kafe_saas
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-minimum-32-characters-long!!}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      CRON_SECRET: ${CRON_SECRET:-cron-secret-change-me}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      # Paddle Billing
+      PADDLE_ENV: ${PADDLE_ENV:-sandbox}
+      PADDLE_API_KEY: ${PADDLE_API_KEY:-}
+      PADDLE_WEBHOOK_SECRET: ${PADDLE_WEBHOOK_SECRET:-}
+      NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: ${NEXT_PUBLIC_PADDLE_CLIENT_TOKEN:-}
+      PADDLE_PRICE_STARTER_MONTHLY: ${PADDLE_PRICE_STARTER_MONTHLY:-}
+      PADDLE_PRICE_STANDARD_MONTHLY: ${PADDLE_PRICE_STANDARD_MONTHLY:-}
+      PADDLE_PRICE_PRO_MONTHLY: ${PADDLE_PRICE_PRO_MONTHLY:-}
+      PADDLE_PRICE_STARTER_YEARLY: ${PADDLE_PRICE_STARTER_YEARLY:-}
+      PADDLE_PRICE_STANDARD_YEARLY: ${PADDLE_PRICE_STANDARD_YEARLY:-}
+      PADDLE_PRICE_PRO_YEARLY: ${PADDLE_PRICE_PRO_YEARLY:-}
+      DEVICE_LOGIN_APPROVAL: ${DEVICE_LOGIN_APPROVAL:-true}
+      PLATFORM_ROOT_DOMAIN: ${PLATFORM_ROOT_DOMAIN:-}
+      NEXT_PUBLIC_PLATFORM_ROOT_DOMAIN: ${NEXT_PUBLIC_PLATFORM_ROOT_DOMAIN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

@@ -1,0 +1,12 @@
+---
+description: Mijoz ilovasiga faqat Ilova sozlamalaridan kontent; xodim/ops narsalari chiqmasin
+alwaysApply: true
+---
+
+# Mijoz ilovasi vs xodim / Operations
+
+- **Mijoz online app** (`/c/[slug]/app`, delivery, Telegram menu): faqat **Ilova sozlamalari** orqali sozlangan / joylangan narsalar ko‘rinsin (masalan, mijoz e’lonlari `audience=CUSTOMER`, promolar, ilova matnlari).
+- **Operations Hub**, Notice (xodim), smena, chat, musiqa jadvali va boshqa **xodimga tegishli** amallar mijoz ilovasida **hech qachon** ko‘rinmasin.
+- Yangi umumiy model (Notice, promo, banner va hokazo) qo‘shilsa: aniq `audience` / manba ajratilsin (`STAFF` | `CUSTOMER`). Default mijozga ochiq qilib qo‘yilmasin.
+- Operations Hub dan yaratilgan yozuvlar → `STAFF` (yoki ekvivalenti). Ilova sozlamalaridan → `CUSTOMER`.
+- Catalog / public API (`cafe-online-catalog`, public routes) faqat `CUSTOMER` (yoki mijoz uchun mo‘ljallangan) ma’lumotni bersin.

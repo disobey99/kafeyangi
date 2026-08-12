@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum GlobalRole {
+  SUPER_ADMIN
+  USER
+}
+
+enum CafeStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum SubscriptionPlan {
+  STARTER
+  STANDARD
+  PRO
+}
+
+enum CafeRole {
+  OWNER
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderSource {
+  QR_TABLE
+  ONLINE
+  WAITER
+  CASHIER
+}
+
+enum TableStatus {
+  FREE
+  OCCUPIED
+  BILL_REQUESTED
+}
+
+enum PromoType {
+  PERCENT
+  FIXED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+}
+
+enum BillingStatus {
+  PENDING
+  PAID
+  FAILED
+  OVERDUE
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  globalRole   GlobalRole @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedCafes   Cafe[]       @relation("CafeOwner")
+  cafeGroups   CafeGroup[]  @relation("GroupOwner")
+  memberships  CafeMember[]
+  sessions     Session[]
+  createdOrders Order[]     @relation("OrderCreatedBy")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+// ─── Organization (Multi-branch) ─────────────────────────────────────────────
+
+model CafeGroup {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  owner User   @relation("GroupOwner", fields: [ownerId], references: [id])
+  cafes Cafe[]
+
+  @@index([ownerId])
+}
+
+// ─── Tenant (Kafe) ───────────────────────────────────────────────────────────
+
+model Cafe {
+  id                 String           @id @default(cuid())
+  name               String
+  slug               String           @unique
+  address            String?
+  phone              String?
+  supportPhone       String?
+  logoUrl            String?
+  status             CafeStatus       @default(TRIAL)
+  plan               SubscriptionPlan @default(STARTER)
+  trialEndsAt        DateTime?
+  subscriptionEndsAt DateTime?
+  paddleCustomerId   String?
+  paddleSubscriptionId String?
+  telegramChatId     String?
+  ownerId            String
+  groupId            String?
+  isMainBranch       Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  owner           User             @relation("CafeOwner", fields: [ownerId], references: [id])
+  group           CafeGroup?       @relation(fields: [groupId], references: [id])
+  members         CafeMember[]
+  categories      Category[]
+  products        Product[]
+  tables          Table[]
+  orders          Order[]
+  promotions      Promotion[]
+  waiterCalls     WaiterCall[]
+  billingInvoices BillingInvoice[]
+
+  @@index([groupId])
+}
+
+model BillingInvoice {
+  id                   String           @id @default(cuid())
+  cafeId               String
+  plan                 SubscriptionPlan
+  amount               Int
+  periodStart          DateTime
+  periodEnd            DateTime
+  status               BillingStatus    @default(PENDING)
+  paidAt               DateTime?
+  method               String?
+  paddleTransactionId  String?          @unique
+  paddleSubscriptionId String?
+  createdAt            DateTime         @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+}
+
+model CafeMember {
+  id        String   @id @default(cuid())
+  cafeId    String
+  userId    String
+  role      CafeRole
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, userId])
+  @@index([cafeId])
+  @@index([userId])
+}
+
+// ─── Menu ────────────────────────────────────────────────────────────────────
+
+model Category {
+  id        String   @id @default(cuid())
+  cafeId    String
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cafe     Cafe      @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([cafeId])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  cafeId      String
+  categoryId  String
+  name        String
+  description String?
+  price       Int      // tiyinlarda (so'm * 100)
+  discountPrice Int?     // tiyinlarda (so'm * 100) - chegirmali narx
+  imageUrl    String?
+  isAvailable Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cafe       Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  promotions Promotion[]
+
+  @@index([cafeId])
+  @@index([categoryId])
+}
+
+// ─── Tables & QR ─────────────────────────────────────────────────────────────
+
+model Table {
+  id        String      @id @default(cuid())
+  cafeId    String
+  number    Int
+  name      String?
+  qrToken   String      @unique @default(cuid())
+  status    TableStatus @default(FREE)
+  posX      Int         @default(0)
+  posY      Int         @default(0)
+  zone      String      @default("HALL")
+  seats     Int         @default(4)
+  assignedWaiterId String?
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  orders      Order[]
+  waiterCalls WaiterCall[]
+
+  @@unique([cafeId, number])
+  @@index([cafeId])
+}
+
+model WaiterCall {
+  id        String   @id @default(cuid())
+  cafeId    String
+  tableId   String
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  table Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+}
+
+// ─── Orders ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id              String      @id @default(cuid())
+  cafeId          String
+  tableId         String?
+  orderNumber     Int
+  type            OrderType   @default(DINE_IN)
+  source          OrderSource @default(QR_TABLE)
+  status          OrderStatus @default(PENDING)
+  customerName    String?
+  customerPhone   String?
+  customerAddress String?
+  notes           String?
+  subtotalAmount  Int         @default(0)
+  discountAmount  Int         @default(0)
+  totalAmount     Int         @default(0)
+  promotionId     String?
+  paymentMethod   PaymentMethod?
+  paidAt          DateTime?
+  createdById     String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  cafe      Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  table     Table?      @relation(fields: [tableId], references: [id])
+  promotion Promotion?  @relation(fields: [promotionId], references: [id])
+  createdBy User?       @relation("OrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items     OrderItem[]
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+  @@index([tableId])
+  @@index([createdById])
+}
+
+model Promotion {
+  id        String    @id @default(cuid())
+  cafeId    String
+  name      String
+  type      PromoType
+  value     Int
+  startTime String?
+  endTime   String?
+  imageUrl  String?
+  productId String?
+  slot      Int?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  cafe    Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orders  Order[]
+
+  @@index([cafeId])
+  @@index([productId])
+}
+
+model OrderItem {
+  id        String      @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int         @default(1)
+  unitPrice Int
+  notes     String?
+  status    OrderStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}

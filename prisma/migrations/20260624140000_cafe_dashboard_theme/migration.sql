@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Cafe" ADD COLUMN "dashboardTheme" TEXT NOT NULL DEFAULT 'CLASSIC';

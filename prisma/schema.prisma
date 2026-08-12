@@ -1,0 +1,1516 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Lokal: sqlite (file:./dev.db). Vercel/Neon: postgresql — scripts/prepare-prisma-schema.mjs avtomatik almashtiradi.
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum GlobalRole {
+  SUPER_ADMIN
+  PLATFORM_STAFF
+  USER
+}
+
+enum PlatformStaffRole {
+  ADMIN
+  SUPPORT
+  ANALYST
+}
+
+enum CafeStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum CafeSuspendReason {
+  ADMIN
+  BILLING
+  TRIAL
+}
+
+enum SubscriptionPlan {
+  STARTER
+  STANDARD
+  PRO
+}
+
+enum DashboardTheme {
+  CLASSIC
+  MODERN
+  PREMIUM
+}
+
+enum CafeRole {
+  OWNER
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN
+  COURIER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderSource {
+  QR_TABLE
+  ONLINE
+  WAITER
+  CASHIER
+}
+
+enum OrderServiceMode {
+  WAITER
+  SELF
+}
+
+enum TableStatus {
+  FREE
+  OCCUPIED
+  BILL_REQUESTED
+}
+
+enum TableZone {
+  HALL
+  BOOTH
+  OUTDOOR
+}
+
+enum PromoType {
+  PERCENT
+  FIXED
+}
+
+/** BANNER — mijoz ilovasi banneri; DISCOUNT — narx/chegirma (Chegirmalar) */
+enum PromoChannel {
+  BANNER
+  DISCOUNT
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  PAYME
+}
+
+enum BillingStatus {
+  PENDING
+  PAID
+  FAILED
+  OVERDUE
+}
+
+enum ShiftSwapStatus {
+  OPEN
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum InventoryCountStatus {
+  PENDING
+  VERIFIED
+  MISMATCH
+}
+
+enum WarehouseMovementType {
+  INIT
+  RECEIPT
+  ISSUE
+  ADJUST
+  TRANSFER_IN
+  TRANSFER_OUT
+  ORDER_CONSUMPTION
+  WASTE
+}
+
+enum WarehouseCountSessionStatus {
+  DRAFT
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  CANCELLED
+}
+
+enum UnitKind {
+  MASS
+  VOLUME
+  COUNT
+}
+
+enum UnitCode {
+  KG
+  G
+  L
+  ML
+  PC
+}
+
+enum NotificationKind {
+  INSIGHT
+  PRAISE
+  COMFORT
+  SYSTEM
+  SUPPORT
+}
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  avatarUrl    String?  // xodim profil rasmi URL manzili
+  /** Parol tiklash / bildirishnomalar uchun Telegram chat */
+  telegramChatId String?
+  globalRole   GlobalRole @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedCafes   Cafe[]       @relation("CafeOwner")
+  cafeGroups   CafeGroup[]  @relation("GroupOwner")
+  memberships  CafeMember[]
+  sessions     Session[]
+  createdOrders Order[]     @relation("OrderCreatedBy")
+  assignedCourierOrders Order[] @relation("OrderAssignedCourier")
+  assignedTables Table[]     @relation("TableAssignedWaiter")
+  pushSubscriptions PushSubscription[]
+  trustedDevices    TrustedDevice[]
+  loginApprovals    LoginApprovalRequest[]
+  passwordResets    PasswordResetToken[]
+  telegramPasswordLinks TelegramPasswordLink[]
+  platformStaff     PlatformStaff?
+  notifications     AppNotification[]
+  staffRatingsReceived StaffRating[] @relation("StaffRatingsReceived")
+  courierLocations     CourierLocation[]
+}
+
+model PlatformStaff {
+  id          String            @id @default(cuid())
+  userId      String            @unique
+  role        PlatformStaffRole
+  /// JSON string[] — menyu va amallar ruxsatlari
+  permissions String            @default("[]")
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AppNotification {
+  id        String           @id @default(cuid())
+  userId    String
+  cafeId    String?
+  kind      NotificationKind
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cafe Cafe? @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([cafeId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+/// Ishonchli qurilma — birinchi marta yoki tasdiqlangan login
+model TrustedDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceId    String
+  deviceLabel String
+  userAgent   String?
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
+/// Boshqa qurilmadan kirish — mavjud qurilmada tasdiqlash
+model LoginApprovalRequest {
+  id            String   @id @default(cuid())
+  userId        String
+  deviceId      String
+  deviceLabel   String
+  userAgent     String?
+  ipAddress     String?
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED
+  approvalToken String?  @unique
+  expiresAt     DateTime
+  resolvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([deviceId])
+}
+
+/// Parol tiklash — emailga yuborilgan 6 xonali kod
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  usedAt    DateTime?
+  /** EMAIL | TELEGRAM */
+  channel   String   @default("EMAIL")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, channel, createdAt])
+}
+
+/** Parol tiklash — Telegram deep-link (start=rst_xxx) */
+model TelegramPasswordLink {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ─── Organization (Multi-branch) ─────────────────────────────────────────────
+
+model CafeGroup {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  owner User   @relation("GroupOwner", fields: [ownerId], references: [id])
+  cafes Cafe[]
+
+  @@index([ownerId])
+}
+
+// ─── Tenant (Kafe) ───────────────────────────────────────────────────────────
+
+model Cafe {
+  id                 String           @id @default(cuid())
+  name               String
+  slug               String           @unique
+  address            String?
+  region             String?          // viloyat / shahar (xarita)
+  latitude           Float?
+  longitude          Float?
+  phone              String?
+  /** Mijoz PWA — qo'llab-quvvatlash telefoni (Ilova sozlamalari) */
+  supportPhone       String?
+  logoUrl            String?
+  /** Mijoz sayti hero fon rasmi */
+  coverImageUrl      String?
+  /** Qisqa slogan — kafe sayti hero */
+  tagline            String?
+  /** Sayt ish soatlari JSON: { monFri, sat, sun } */
+  businessHours      String?
+  customDomain       String?          @unique
+  menuPrimaryColor   String?          // hex, masalan #d97706
+  minOrderAmount     Int              @default(0) // tiyin
+  deliveryFee        Int              @default(0)
+  deliveryTimeMinutes Int             @default(45)
+  deliveryEnabled    Boolean          @default(true)
+  waiterServiceFeePercent Int         @default(0) // 0-100, ofitsiant buyurtmalariga xizmat foizi
+  loyaltyEnabled         Boolean      @default(true)
+  loyaltyTerms           String?
+  loyaltyProgramType     LoyaltyProgramType @default(CASHBACK)
+  loyaltyRedeemPeriod    LoyaltyRedeemPeriod @default(MONTH)
+  loyaltyCashbackPercent Int          @default(5) // 0-100
+  socialInstagram        String?
+  socialTelegram         String?
+  socialFacebook         String?
+  dailyReportEnabled Boolean          @default(true)
+  dailyReportHour    Int              @default(22) // 0-23
+  /** Mijoz Telegram bot buyurtmasi (platforma boti deep-link) */
+  telegramBotEnabled Boolean          @default(true)
+  status             CafeStatus       @default(TRIAL)
+  suspendReason      CafeSuspendReason?
+  plan               SubscriptionPlan @default(STARTER)
+  trialEndsAt        DateTime?
+  subscriptionEndsAt DateTime?
+  paddleCustomerId   String?
+  paddleSubscriptionId String?
+  telegramChatId     String?
+  paymeEnabled       Boolean          @default(false)
+  paymeMerchantId    String?
+  paymeKey           String?
+  ofdEnabled         Boolean          @default(false)
+  ofdTin             String?          // STIR
+  ofdCompanyName     String?
+  ofdFmNumber        String?          // FN serial
+  dashboardTheme     DashboardTheme   @default(CLASSIC)
+  ownerId            String
+  groupId            String?
+  isMainBranch       Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  owner             User               @relation("CafeOwner", fields: [ownerId], references: [id])
+  group             CafeGroup?         @relation(fields: [groupId], references: [id])
+  members           CafeMember[]
+  categories        Category[]
+  products          Product[]
+  tables            Table[]
+  orders            Order[]
+  promotions        Promotion[]
+  waiterCalls       WaiterCall[]
+  billingInvoices   BillingInvoice[]
+  pushSubscriptions PushSubscription[]
+  loyaltyCustomers  LoyaltyCustomer[]
+  referralCodes     ReferralCode[]
+  referralClaimsSent ReferralClaim[] @relation("ReferralSenderCafe")
+  referralClaimsReceived ReferralClaim[] @relation("ReferralReceiverCafe")
+  notices           Notice[]
+  chatMessages      ChatMessage[]
+  shiftSwapRequests ShiftSwapRequest[]
+  iotTemperatureEvents IoTTemperatureEvent[]
+  freshnessItems    FreshnessItem[]
+  breakSessions     BreakSession[]
+  cashVarianceReports CashVarianceReport[]
+  musicSchedules    MusicSchedule[]
+  inventoryBlindCounts InventoryBlindCount[]
+  warehouses            Warehouse[]
+  rawMaterials          RawMaterial[]
+  unitConversions       UnitConversion[]
+  materialLots          MaterialLot[]
+  stockMovements        StockMovement[]
+  stockTransfers        StockTransfer[]
+  stockTransferItems    StockTransferItem[]
+  suppliers             Supplier[]
+  goodsReceipts         GoodsReceipt[]
+  goodsReceiptItems     GoodsReceiptItem[]
+  inventoryCountSessions InventoryCountSession[]
+  inventoryCountLines   InventoryCountLine[]
+  inventoryAuditLogs    InventoryAuditLog[]
+  recipes               Recipe[]
+  recipeItems           RecipeItem[]
+  notifications        AppNotification[]
+  staffRatings         StaffRating[]
+  orderReviews         OrderReview[]
+  productReviews       ProductReview[]
+  courierLocations     CourierLocation[]
+  appCustomers         CafeAppCustomer[]
+  supportConversations SupportConversation[]
+  prepStations         PrepStation[]
+  kitchenPrintJobs     KitchenPrintJob[]
+  printAgentToken      String?
+
+  @@index([groupId])
+  @@index([customDomain])
+}
+
+/// Tayyorlash stansiyasi (oshxona, bar, kabob va hokazo)
+model PrepStation {
+  id          String   @id @default(cuid())
+  cafeId      String
+  name        String
+  sortOrder   Int      @default(0)
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  /// Termal printer IP (masalan 192.168.1.50 yoki 192.168.1.50:9100)
+  printerHost String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cafe       Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  products   Product[]
+  categories Category[]  @relation("CategoryDefaultStation")
+  orderItems OrderItem[]
+  printJobs  KitchenPrintJob[]
+
+  @@index([cafeId])
+  @@index([cafeId, isActive])
+}
+
+enum KitchenPrintJobStatus {
+  PENDING
+  PRINTING
+  DONE
+  FAILED
+}
+
+/** Oshxona cheki navbati — brauzer oynasiga bog'liq emas (print-agent chop etadi) */
+model KitchenPrintJob {
+  id            String                 @id @default(cuid())
+  cafeId        String
+  orderId       String
+  prepStationId String?
+  status        KitchenPrintJobStatus  @default(PENDING)
+  payloadJson   String
+  errorMessage  String?
+  attempts      Int                    @default(0)
+  createdAt     DateTime               @default(now())
+  printedAt     DateTime?
+
+  cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  prepStation PrepStation? @relation(fields: [prepStationId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, status, createdAt])
+  @@index([orderId])
+}
+
+model BillingInvoice {
+  id                   String           @id @default(cuid())
+  cafeId               String
+  plan                 SubscriptionPlan
+  amount               Int
+  periodStart          DateTime
+  periodEnd            DateTime
+  status               BillingStatus    @default(PENDING)
+  paidAt               DateTime?
+  method               String?          // PADDLE | MANUAL
+  paddleTransactionId  String?          @unique
+  paddleSubscriptionId String?
+  createdAt            DateTime         @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+}
+
+model CafeMember {
+  id               String   @id @default(cuid())
+  cafeId           String
+  userId           String
+  role             CafeRole
+  isActive         Boolean  @default(true)
+  /// Yetkazuvchi smena: true = buyurtma/push keladi
+  onDuty           Boolean  @default(false)
+  pinHash          String?
+  pinResetRequired Boolean  @default(false)
+  /// WebAuthn (barmoq / Face ID) — platform credential
+  webauthnCredentialId String?
+  webauthnPublicKey    String?
+  webauthnCounter      Int      @default(0)
+  salary           Int      @default(0) // tiyin (cents) - xodim oylik maoshi
+  lastActiveAt     DateTime? // xodim oxirgi marta tarmoqda bo'lgan vaqt
+  createdAt        DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, userId])
+  @@index([cafeId])
+  @@index([userId])
+  @@index([cafeId, role, onDuty])
+}
+
+// ─── Menu ────────────────────────────────────────────────────────────────────
+
+enum MenuFoodTag {
+  MILLIY
+  GOSHTLI
+  SUYUQ
+  KABOB
+  SALAT
+  ICHIMLIK
+  DESERT
+  FAST_FOOD
+}
+
+model Category {
+  id                    String   @id @default(cuid())
+  cafeId                String
+  name                  String
+  nameRu                String?
+  nameEn                String?
+  sortOrder             Int      @default(0)
+  isActive              Boolean  @default(true)
+  defaultPrepStationId  String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  cafe               Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  defaultPrepStation PrepStation? @relation("CategoryDefaultStation", fields: [defaultPrepStationId], references: [id], onDelete: SetNull)
+  products           Product[]
+
+  @@index([cafeId])
+  @@index([defaultPrepStationId])
+}
+
+model ProductModifierGroup {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  nameRu    String?
+  nameEn    String?
+  required  Boolean  @default(false)
+  minSelect Int      @default(0)
+  maxSelect Int      @default(1)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  options ProductModifierOption[]
+
+  @@index([productId])
+}
+
+model ProductModifierOption {
+  id         String @id @default(cuid())
+  groupId    String
+  name       String
+  nameRu     String?
+  nameEn     String?
+  priceDelta Int    @default(0) // tiyin
+  sortOrder  Int    @default(0)
+
+  group ProductModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  cafeId         String
+  categoryId     String
+  name           String
+  nameRu         String?
+  nameEn         String?
+  description    String?
+  descriptionRu  String?
+  descriptionEn  String?
+  price          Int      // tiyinlarda (so'm * 100)
+  discountPrice  Int?     // tiyinlarda (so'm * 100) - chegirmali narx
+  imageUrl       String?
+  menuTag        MenuFoodTag?
+  prepStationId  String?
+  isAvailable    Boolean  @default(true)
+  trackStock     Boolean  @default(false)
+  stockQty       Int?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  cafe           Cafe                   @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  category       Category               @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  prepStation    PrepStation?           @relation(fields: [prepStationId], references: [id], onDelete: SetNull)
+  orderItems     OrderItem[]
+  modifierGroups ProductModifierGroup[]
+  reviews        ProductReview[]
+  recipe        Recipe?
+  movementItems StockMovement[]
+  receiptItems  GoodsReceiptItem[]
+  transferItems StockTransferItem[]
+  countLines    InventoryCountLine[]
+  promotions    Promotion[]
+
+  @@index([cafeId])
+  @@index([categoryId])
+  @@index([prepStationId])
+}
+
+// ─── Tables & QR ─────────────────────────────────────────────────────────────
+
+model Table {
+  id        String      @id @default(cuid())
+  cafeId    String
+  number    Int
+  name      String?
+  qrToken   String      @unique @default(cuid())
+  status    TableStatus @default(FREE)
+  posX      Int         @default(0)
+  posY      Int         @default(0)
+  zone      String      @default("HALL")
+  seats     Int         @default(4) // o'tirish joylari soni
+  assignedWaiterId String?
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+
+  cafe           Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  assignedWaiter User?        @relation("TableAssignedWaiter", fields: [assignedWaiterId], references: [id], onDelete: SetNull)
+  orders         Order[]
+  waiterCalls    WaiterCall[]
+  guestVisits    TableGuestVisit[]
+  staffRatings   StaffRating[]
+
+  @@unique([cafeId, number])
+  @@index([cafeId])
+}
+
+model TableGuestVisit {
+  id         String    @id @default(cuid())
+  tableId    String
+  visitToken String    @unique @default(cuid())
+  lastSeenAt DateTime  @default(now())
+  endedAt    DateTime?
+  createdAt  DateTime  @default(now())
+
+  table  Table   @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([tableId])
+  @@index([tableId, endedAt])
+  @@index([visitToken])
+}
+
+model StaffRating {
+  id           String   @id @default(cuid())
+  cafeId       String
+  memberUserId String
+  tableId      String?
+  score        Int
+  comment      String?
+  createdAt    DateTime @default(now())
+
+  cafe   Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  member User  @relation("StaffRatingsReceived", fields: [memberUserId], references: [id], onDelete: Cascade)
+  table  Table? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, memberUserId])
+  @@index([tableId])
+}
+
+model OrderReview {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  cafeId    String
+  score     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
+}
+
+/** Taom sahifasidagi mijoz fikrlari (buyurtma reytingidan nusxa) */
+model ProductReview {
+  id        String   @id @default(cuid())
+  productId String
+  cafeId    String
+  orderId   String?
+  score     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cafe    Cafe    @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([productId, score])
+  @@index([cafeId, createdAt])
+  @@index([orderId])
+}
+
+/** Yetkazuvchi jonli GPS */
+model CourierLocation {
+  id        String   @id @default(cuid())
+  cafeId    String
+  userId    String
+  latitude  Float
+  longitude Float
+  updatedAt DateTime @updatedAt
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, userId])
+  @@index([cafeId, updatedAt])
+}
+
+model SupportConversation {
+  id        String   @id @default(cuid())
+  cafeId    String
+  status    String   @default("OPEN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cafe     Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@index([cafeId, status])
+}
+
+model SupportMessage {
+  id             String    @id @default(cuid())
+  conversationId String
+  cafeId         String
+  senderType     String
+  senderUserId   String
+  senderName     String
+  text           String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([cafeId, createdAt])
+}
+
+model WaiterCall {
+  id            String    @id @default(cuid())
+  cafeId        String
+  tableId       String
+  status        String    @default("PENDING")
+  respondedAt   DateTime?
+  respondedById String?
+  createdAt     DateTime  @default(now())
+
+  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  table Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+}
+
+// ─── Orders ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id              String      @id @default(cuid())
+  cafeId          String
+  tableId         String?
+  orderNumber     Int
+  type            OrderType   @default(DINE_IN)
+  source          OrderSource @default(QR_TABLE)
+  serviceMode     OrderServiceMode @default(WAITER)
+  status          OrderStatus @default(PENDING)
+  customerName    String?
+  customerPhone   String?
+  customerAddress String?
+  customerLat     Float?
+  customerLng     Float?
+  notes           String?
+  subtotalAmount  Int         @default(0)
+  discountAmount  Int         @default(0)
+  serviceFeeAmount Int        @default(0) // ofitsiant xizmat foizi (tiyin)
+  totalAmount     Int         @default(0)
+  promotionId     String?
+  paymentMethod   PaymentMethod?
+  paidAt          DateTime?
+  paymeTransactionId String?
+  fiscalReceiptNo String?
+  fiscalQrData    String?
+  fiscalIssuedAt  DateTime?
+  createdById       String?
+  assignedCourierId String?
+  guestVisitId      String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  cafe             Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  table            Table?      @relation(fields: [tableId], references: [id])
+  promotion        Promotion?  @relation(fields: [promotionId], references: [id])
+  createdBy        User?       @relation("OrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  assignedCourier  User?       @relation("OrderAssignedCourier", fields: [assignedCourierId], references: [id], onDelete: SetNull)
+  guestVisit       TableGuestVisit? @relation(fields: [guestVisitId], references: [id], onDelete: SetNull)
+  items            OrderItem[]
+  kitchenPrintJobs KitchenPrintJob[]
+  review           OrderReview?
+
+  @@index([cafeId])
+  @@index([cafeId, status])
+  @@index([cafeId, paidAt])
+  @@index([tableId])
+  @@index([tableId, status, createdAt])
+  @@index([createdById])
+  @@index([assignedCourierId])
+  @@index([guestVisitId])
+  @@index([cafeId, type, status])
+}
+
+model Promotion {
+  id        String       @id @default(cuid())
+  cafeId    String
+  name      String
+  type      PromoType
+  channel   PromoChannel @default(DISCOUNT)
+  value     Int
+  startTime String?
+  endTime   String?
+  imageUrl  String?
+  productId String?
+  slot      Int?
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  cafe    Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orders  Order[]
+
+  @@index([cafeId])
+  @@index([cafeId, channel])
+  @@index([productId])
+}
+
+model OrderItem {
+  id               String      @id @default(cuid())
+  orderId          String
+  productId        String
+  quantity         Int         @default(1)
+  unitPrice        Int
+  modifierSummary  String?
+  notes            String?
+  isNewAddition    Boolean     @default(false)
+  prepStationId    String?
+  prepStationName  String?
+  status           OrderStatus @default(PENDING)
+  createdAt        DateTime    @default(now())
+
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product      @relation(fields: [productId], references: [id])
+  prepStation PrepStation? @relation(fields: [prepStationId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([prepStationId])
+}
+
+// ─── Push (fon bildirishnomalari) ────────────────────────────────────────────
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  cafeId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@index([userId])
+}
+
+// ─── Sodiqlik kartasi ─────────────────────────────────────────────────────────
+
+enum LoyaltyTxType {
+  EARN
+  REDEEM
+}
+
+enum LoyaltyProgramType {
+  CASHBACK
+  PROMOTIONS
+}
+
+enum LoyaltyRedeemPeriod {
+  WEEK
+  MONTH
+}
+
+/** Yetkazib berish PWA mijoz profili (telefon bo'yicha) */
+model CafeAppCustomer {
+  id           String   @id @default(cuid())
+  cafeId       String
+  phone        String
+  name         String
+  email        String?
+  passwordHash String?
+  address      String   @default("")
+  lat          Float?
+  lng          Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, phone])
+  @@index([cafeId])
+  @@index([cafeId, email])
+}
+
+model LoyaltyCustomer {
+  id         String   @id @default(cuid())
+  cafeId     String
+  phone      String
+  points     Int      @default(0)
+  cashbackBalanceTiyin Int @default(0)
+  lastCashbackRedeemAt DateTime?
+  totalSpent Int      @default(0)
+  visitCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cafe         Cafe                 @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+
+  @@unique([cafeId, phone])
+  @@index([cafeId])
+}
+
+model LoyaltyTransaction {
+  id         String        @id @default(cuid())
+  customerId String
+  orderId    String?
+  points     Int
+  type       LoyaltyTxType
+  note       String?
+  createdAt  DateTime      @default(now())
+
+  customer LoyaltyCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([orderId])
+}
+
+model ReferralCode {
+  id        String   @id @default(cuid())
+  cafeId    String
+  code      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+}
+
+model ReferralClaim {
+  id             String   @id @default(cuid())
+  code           String
+  senderCafeId   String
+  receiverCafeId String
+  rewardMonths   Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  senderCafe   Cafe @relation("ReferralSenderCafe", fields: [senderCafeId], references: [id], onDelete: Cascade)
+  receiverCafe Cafe @relation("ReferralReceiverCafe", fields: [receiverCafeId], references: [id], onDelete: Cascade)
+
+  @@unique([senderCafeId, receiverCafeId])
+  @@index([receiverCafeId])
+}
+
+model Notice {
+  id        String   @id @default(cuid())
+  cafeId    String
+  title     String
+  body      String
+  priority  String   @default("NORMAL")
+  /// STAFF | CUSTOMER — kimga ko'rinadi
+  audience  String   @default("CUSTOMER")
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
+  @@index([cafeId, audience, createdAt])
+}
+
+model ChatMessage {
+  id         String   @id @default(cuid())
+  cafeId     String
+  senderId   String
+  senderName String
+  text       String
+  replyToId  String?
+  createdAt  DateTime @default(now())
+
+  cafe    Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  replyTo ChatMessage?      @relation("ChatReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies ChatMessage[]     @relation("ChatReply")
+  reads   ChatMessageRead[]
+
+  @@index([cafeId, createdAt])
+  @@index([replyToId])
+}
+
+model ChatMessageRead {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  userName  String
+  readAt    DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+}
+
+model ShiftSwapRequest {
+  id             String          @id @default(cuid())
+  cafeId         String
+  requesterId    String
+  requesterName  String
+  fromDate       DateTime
+  toDate         DateTime
+  note           String?
+  status         ShiftSwapStatus @default(OPEN)
+  acceptedBy     String?
+  acceptedByName String?
+  createdAt      DateTime        @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, status])
+}
+
+model IoTTemperatureEvent {
+  id          String   @id @default(cuid())
+  cafeId      String
+  sensorName  String
+  temperature Float
+  threshold   Float    @default(5)
+  isAlarm     Boolean  @default(false)
+  payload     String?
+  createdAt   DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
+}
+
+model FreshnessItem {
+  id          String   @id @default(cuid())
+  cafeId      String
+  name        String
+  expiresAt   DateTime
+  location    String?
+  note        String?
+  isExpired   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, expiresAt])
+}
+
+model BreakSession {
+  id          String   @id @default(cuid())
+  cafeId      String
+  userId      String
+  userName    String
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  plannedMin  Int      @default(15)
+  note        String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, startedAt])
+}
+
+model CashVarianceReport {
+  id           String   @id @default(cuid())
+  cafeId       String
+  cashierId    String
+  cashierName  String
+  shiftLabel   String?
+  expectedCash Int
+  actualCash   Int
+  variance     Int
+  note         String?
+  createdAt    DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
+}
+
+model MusicSchedule {
+  id          String   @id @default(cuid())
+  cafeId      String
+  title       String
+  source      String
+  startsAt    String
+  endsAt      String
+  volume      Int      @default(70)
+  daysMask    String   @default("1234567")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, isActive])
+}
+
+model InventoryBlindCount {
+  id             String               @id @default(cuid())
+  cafeId         String
+  itemName       String
+  expectedQty    Int
+  countedQty     Int
+  status         InventoryCountStatus @default(PENDING)
+  mismatchReason String?
+  createdBy      String?
+  createdAt      DateTime             @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  cafeId    String
+  name      String
+  code      String
+  isPrimary Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cafe                  Cafe                  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  materialLots          MaterialLot[]
+  stockMovements        StockMovement[]
+  goodsReceipts         GoodsReceipt[]
+  outgoingTransfers     StockTransfer[]       @relation("TransferFromWarehouse")
+  incomingTransfers     StockTransfer[]       @relation("TransferToWarehouse")
+  inventoryCountSessions InventoryCountSession[]
+  inventoryCountLines   InventoryCountLine[]
+  inventoryAuditLogs    InventoryAuditLog[]
+
+  @@unique([cafeId, code])
+  @@index([cafeId, isActive])
+}
+
+model RawMaterial {
+  id            String   @id @default(cuid())
+  cafeId        String
+  name          String
+  sku           String?
+  baseUnit      UnitCode
+  unitKind      UnitKind
+  trackLots     Boolean  @default(true)
+  minQtyBase    Int?     // base birlikdagi minimal threshold (masalan g/ml/pc)
+  reorderQtyBase Int?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cafe           Cafe               @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  lots           MaterialLot[]
+  movements      StockMovement[]
+  receiptItems   GoodsReceiptItem[]
+  transferItems  StockTransferItem[]
+  countLines     InventoryCountLine[]
+  recipeItems    RecipeItem[]
+  unitConversions UnitConversion[]
+
+  @@index([cafeId, isActive])
+  @@unique([cafeId, name])
+}
+
+model UnitConversion {
+  id             String   @id @default(cuid())
+  cafeId         String
+  rawMaterialId  String
+  fromUnit       UnitCode
+  toUnit         UnitCode
+  multiplier     Float
+  createdAt      DateTime @default(now())
+
+  cafe        Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId])
+  @@unique([rawMaterialId, fromUnit, toUnit])
+}
+
+model MaterialLot {
+  id                String   @id @default(cuid())
+  cafeId            String
+  warehouseId       String
+  rawMaterialId     String
+  lotCode           String
+  receivedAt        DateTime @default(now())
+  expiresAt         DateTime?
+  unitCostTiyinBase Int      @default(0)
+  qtyBase           Int      @default(0)
+  initialQtyBase    Int      @default(0)
+  supplierId        String?
+  goodsReceiptId    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  cafe         Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rawMaterial  RawMaterial  @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  goodsReceipt GoodsReceipt? @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
+  movements    StockMovement[]
+
+  @@index([cafeId, warehouseId, expiresAt])
+  @@unique([warehouseId, rawMaterialId, lotCode])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  cafeId    String
+  name      String
+  phone     String?
+  email     String?
+  telegram  String?
+  address   String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cafe         Cafe            @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  goodsReceipts GoodsReceipt[]
+  materialLots   MaterialLot[]
+
+  @@index([cafeId, isActive])
+  @@unique([cafeId, name])
+}
+
+model GoodsReceipt {
+  id          String   @id @default(cuid())
+  cafeId      String
+  warehouseId String
+  supplierId  String?
+  receiptNo   String
+  receivedAt  DateTime @default(now())
+  note        String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cafe       Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  warehouse  Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  supplier   Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items      GoodsReceiptItem[]
+  lots       MaterialLot[]
+
+  @@index([cafeId, receivedAt])
+  @@unique([cafeId, receiptNo])
+}
+
+model GoodsReceiptItem {
+  id             String   @id @default(cuid())
+  cafeId         String
+  goodsReceiptId String
+  rawMaterialId  String
+  productId      String?
+  unit           UnitCode
+  qty            Int
+  qtyBase        Int
+  unitCostTiyin  Int      @default(0)
+  lotCode        String?
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  cafe         Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  goodsReceipt GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  rawMaterial  RawMaterial  @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, rawMaterialId])
+}
+
+model StockTransfer {
+  id              String   @id @default(cuid())
+  cafeId          String
+  transferNo      String
+  fromWarehouseId String
+  toWarehouseId   String
+  note            String?
+  status          String   @default("DRAFT") // DRAFT | SENT | RECEIVED | CANCELLED
+  createdBy       String?
+  approvedBy      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cafe          Cafe      @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  fromWarehouse Warehouse @relation("TransferFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: Cascade)
+  toWarehouse   Warehouse @relation("TransferToWarehouse", fields: [toWarehouseId], references: [id], onDelete: Cascade)
+  items         StockTransferItem[]
+
+  @@index([cafeId, createdAt])
+  @@unique([cafeId, transferNo])
+}
+
+model StockTransferItem {
+  id              String   @id @default(cuid())
+  cafeId          String
+  transferId      String
+  rawMaterialId   String
+  productId       String?
+  unit            UnitCode
+  qty             Int
+  qtyBase         Int
+  fromLotId       String?
+  toLotId         String?
+  createdAt       DateTime @default(now())
+
+  cafe         Cafe          @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  transfer     StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  rawMaterial  RawMaterial   @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, rawMaterialId])
+}
+
+model StockMovement {
+  id              String                @id @default(cuid())
+  cafeId          String
+  warehouseId     String
+  rawMaterialId   String
+  productId       String?
+  movementType    WarehouseMovementType
+  direction       String                // IN | OUT
+  unit            UnitCode
+  qty             Int
+  qtyBase         Int
+  lotId           String?
+  unitCostTiyin   Int?
+  refType         String?
+  refId           String?
+  note            String?
+  actorUserId     String?
+  createdAt       DateTime              @default(now())
+
+  cafe        Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  product     Product?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  lot         MaterialLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, createdAt])
+  @@index([warehouseId, rawMaterialId, createdAt])
+}
+
+model Recipe {
+  id            String   @id @default(cuid())
+  cafeId        String
+  productId     String   @unique
+  outputQty     Int      @default(1)
+  outputUnit    UnitCode @default(PC)
+  note          String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cafe      Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items     RecipeItem[]
+
+  @@index([cafeId, isActive])
+}
+
+model RecipeItem {
+  id            String   @id @default(cuid())
+  cafeId        String
+  recipeId      String
+  rawMaterialId String
+  unit          UnitCode
+  qty           Int
+  qtyBase       Int
+  wastagePct    Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  cafe        Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  recipe      Recipe      @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, rawMaterialId])
+  @@unique([recipeId, rawMaterialId])
+}
+
+model InventoryCountSession {
+  id          String                     @id @default(cuid())
+  cafeId      String
+  warehouseId String
+  title       String
+  status      WarehouseCountSessionStatus @default(DRAFT)
+  startedAt   DateTime?
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  createdBy   String?
+  note        String?
+  createdAt   DateTime                   @default(now())
+  updatedAt   DateTime                   @updatedAt
+
+  cafe      Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  lines     InventoryCountLine[]
+
+  @@index([cafeId, createdAt])
+}
+
+model InventoryCountLine {
+  id               String   @id @default(cuid())
+  cafeId           String
+  sessionId        String
+  warehouseId      String
+  rawMaterialId    String
+  productId        String?
+  expectedQtyBase  Int
+  countedQtyBase   Int
+  varianceQtyBase  Int
+  note             String?
+  createdAt        DateTime @default(now())
+
+  cafe        Cafe                  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  session     InventoryCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  rawMaterial RawMaterial           @relation(fields: [rawMaterialId], references: [id], onDelete: Cascade)
+  product     Product?              @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, rawMaterialId])
+}
+
+model InventoryAuditLog {
+  id             String   @id @default(cuid())
+  cafeId         String
+  warehouseId    String?
+  entityType     String
+  entityId       String
+  action         String
+  reason         String?
+  beforeJson     String?
+  afterJson      String?
+  actorUserId    String?
+  createdAt      DateTime @default(now())
+
+  cafe      Cafe      @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+
+  @@index([cafeId, createdAt])
+  @@index([entityType, entityId])
+}
