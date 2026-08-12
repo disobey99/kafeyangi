@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  // Lokal: sqlite (file:./dev.db). Vercel/Neon: postgresql — scripts/prepare-prisma-schema.mjs avtomatik almashtiradi.
-  provider = "sqlite"
+  // Vercel / Neon: postgresql
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
