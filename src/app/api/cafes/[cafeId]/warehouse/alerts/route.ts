@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireCafeManager } from "@/lib/cafe-access";
+import { requireCafeInventory } from "@/lib/cafe-access";
 import { checkPlanFeature } from "@/lib/plan-access";
 import { getLowStockAlerts } from "@/lib/warehouse";
 import { prisma } from "@/lib/prisma";
@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ cafeId: string }> },
 ) {
   const { cafeId } = await params;
-  const access = await requireCafeManager(cafeId);
+  const access = await requireCafeInventory(cafeId);
   if (!access.ok) return access.response;
 
   const feature = await checkPlanFeature(cafeId, "inventoryRation");
@@ -23,7 +23,7 @@ export async function GET(
         expiresAt: { not: null },
       },
       include: {
-        rawMaterial: { select: { name: true } },
+        rawMaterial: { select: { name: true, baseUnit: true } },
         warehouse: { select: { name: true } },
       },
       orderBy: { expiresAt: "asc" },

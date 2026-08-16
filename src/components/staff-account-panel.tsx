@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { TrustedDevicesPanel } from "@/components/trusted-devices-panel";
 import { ShiftSwapPanel } from "@/components/shift-swap-panel";
+import { StaffBiometricSettings } from "@/components/staff-biometric-settings";
 
 type Profile = {
   name: string;
@@ -449,6 +450,8 @@ export function StaffAccountPanel({
               <option value="600000">10 daqiqa</option>
             </select>
           </div>
+
+          <StaffBiometricSettings cafeId={cafeId} />
 
           <TrustedDevicesPanel variant="cashier" />
         </div>

@@ -24,6 +24,14 @@
 .DS_Store
 *.pem
 .tools/
+android-signing/
+*.keystore
+*.jks
+keystore.properties
+keystore-credentials.txt
+*.apk
+/public/downloads/*.apk
+!/public/downloads/README.txt
 
 # debug
 npm-debug.log*

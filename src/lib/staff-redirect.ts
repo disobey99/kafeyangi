@@ -7,6 +7,10 @@ const STAFF_PANEL: Partial<Record<CafeRole, string>> = {
   [CafeRole.KITCHEN]: "kitchen",
 };
 
+function warehouseHome(cafeId: string) {
+  return `/dashboard/${cafeId}/warehouse`;
+}
+
 export async function getLoginRedirect(
   userId: string,
   globalRole: GlobalRole
@@ -45,11 +49,15 @@ export async function getLoginRedirect(
     if (m.role === CafeRole.COURIER) {
       return `/c/${m.cafe.slug}/app`;
     }
+    if (m.role === CafeRole.WAREHOUSE) {
+      return warehouseHome(m.cafe.id);
+    }
     const panel = STAFF_PANEL[m.role];
     if (panel) return `/${panel}/${m.cafe.id}`;
   }
 
   const staffPriority = [
+    CafeRole.WAREHOUSE,
     CafeRole.CASHIER,
     CafeRole.WAITER,
     CafeRole.KITCHEN,
@@ -59,6 +67,7 @@ export async function getLoginRedirect(
     const m = memberships.find((x) => x.role === role);
     if (!m) continue;
     if (role === CafeRole.COURIER) return `/c/${m.cafe.slug}/app`;
+    if (role === CafeRole.WAREHOUSE) return warehouseHome(m.cafe.id);
     if (STAFF_PANEL[role]) return `/${STAFF_PANEL[role]}/${m.cafe.id}`;
   }
 

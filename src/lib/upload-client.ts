@@ -1,6 +1,5 @@
-/** Browser: bitta rasm yuklash + eski lokal faylni almashtirish */
-export async function uploadCafeImage(
-  cafeId: string,
+async function postImageUpload(
+  endpoint: string,
   file: File,
   replaceUrl?: string | null,
 ): Promise<{ url: string } | { error: string }> {
@@ -11,7 +10,7 @@ export async function uploadCafeImage(
   }
 
   try {
-    const res = await fetch(`/api/cafes/${cafeId}/upload`, {
+    const res = await fetch(endpoint, {
       method: "POST",
       body,
     });
@@ -26,4 +25,21 @@ export async function uploadCafeImage(
   } catch {
     return { error: "Rasm yuklashda ulanish xatosi" };
   }
+}
+
+/** Browser: bitta rasm yuklash + eski lokal faylni almashtirish */
+export async function uploadCafeImage(
+  cafeId: string,
+  file: File,
+  replaceUrl?: string | null,
+): Promise<{ url: string } | { error: string }> {
+  return postImageUpload(`/api/cafes/${cafeId}/upload`, file, replaceUrl);
+}
+
+/** Super admin Shopping: mahsulot / kategoriya rasmi */
+export async function uploadPlatformImage(
+  file: File,
+  replaceUrl?: string | null,
+): Promise<{ url: string } | { error: string }> {
+  return postImageUpload("/api/platform/upload", file, replaceUrl);
 }

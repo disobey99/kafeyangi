@@ -136,7 +136,7 @@ async function showPopup(title: string, body: string, tag: string) {
         renotify: true,
         requireInteraction: true,
         silent: false,
-      });
+      } as NotificationOptions);
       setTimeout(() => n.close(), 20000);
     } catch {
       /* ignore */

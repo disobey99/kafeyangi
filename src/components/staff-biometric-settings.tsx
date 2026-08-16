@@ -4,34 +4,52 @@ import { useCallback, useEffect, useState } from "react";
 import { Fingerprint } from "lucide-react";
 import {
   biometricUserMessage,
+  canInvokeStaffBiometric,
   disableStaffBiometric,
-  isStaffBiometricAvailable,
   registerStaffBiometric,
 } from "@/lib/staff-webauthn-client";
+import { isCapacitorNativeApp } from "@/lib/staff-native-biometric";
 
 export function StaffBiometricSettings({ cafeId }: { cafeId: string }) {
-  const [supported, setSupported] = useState(false);
+  const [canInvoke, setCanInvoke] = useState(false);
   const [hasBiometric, setHasBiometric] = useState(false);
+  const [hasPin, setHasPin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hint, setHint] = useState("");
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/cafes/${cafeId}/staff/pin`);
       if (!res.ok) return;
-      const data = (await res.json()) as { hasBiometric?: boolean };
+      const data = (await res.json()) as {
+        hasBiometric?: boolean;
+        hasPin?: boolean;
+        unlocked?: boolean;
+      };
       setHasBiometric(Boolean(data.hasBiometric));
+      setHasPin(Boolean(data.hasPin));
     } catch {
       /* ignore */
     }
   }, [cafeId]);
 
   useEffect(() => {
-    void isStaffBiometricAvailable().then(setSupported);
-    void refresh();
+    let cancelled = false;
+    void (async () => {
+      const ok = await canInvokeStaffBiometric();
+      if (cancelled) return;
+      setCanInvoke(ok);
+      await refresh();
+      if (cancelled) return;
+      if (isCapacitorNativeApp()) {
+        setHint("APK: tugma bosilganda telefon biometriya oynasi ochiladi");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
-
-  if (!supported) return null;
 
   async function toggle() {
     setError("");
@@ -41,6 +59,10 @@ export function StaffBiometricSettings({ cafeId }: { cafeId: string }) {
         await disableStaffBiometric(cafeId);
         setHasBiometric(false);
       } else {
+        if (!hasPin) {
+          setError("Avval ekran PIN parolini o‘rnating");
+          return;
+        }
         await registerStaffBiometric(cafeId);
         setHasBiometric(true);
       }
@@ -64,7 +86,13 @@ export function StaffBiometricSettings({ cafeId }: { cafeId: string }) {
           </p>
           <p className="text-xs text-[var(--dp-muted)]">
             Qulflanganda PIN o&apos;rniga biometriya
+            {!canInvoke && !hasBiometric
+              ? " — qurilmada biometriya yo‘q yoki sozlanmagan bo‘lishi mumkin"
+              : ""}
           </p>
+          {hint ? (
+            <p className="mt-1 text-[11px] text-[var(--dp-muted)]">{hint}</p>
+          ) : null}
         </div>
         <button
           type="button"

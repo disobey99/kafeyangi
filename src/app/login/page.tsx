@@ -29,7 +29,12 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
-  const [tgLoading, setTgLoading] = useState(false);
+  const [support, setSupport] = useState<{
+    email?: string | null;
+    phone?: string | null;
+    telegram?: string | null;
+  } | null>(null);
+  const [locked, setLocked] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<{
     requestId: string;
     deviceLabel: string;
@@ -50,6 +55,39 @@ function LoginForm() {
     setNewPassword("");
     setConfirmPassword("");
     setShowPassword(false);
+    setLocked(false);
+  }
+
+  function SupportBox() {
+    if (!support && !locked) return null;
+    return (
+      <div className="rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-center text-xs text-amber-100/90">
+        <p className="font-semibold text-amber-200">Supportga murojaat</p>
+        {support?.email && (
+          <p className="mt-1">
+            <a href={`mailto:${support.email}`} className="underline">
+              {support.email}
+            </a>
+          </p>
+        )}
+        {support?.phone && <p className="mt-0.5 tabular-nums">{support.phone}</p>}
+        {support?.telegram && (
+          <p className="mt-0.5">
+            <a
+              href={`https://t.me/${support.telegram}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              @{support.telegram}
+            </a>
+          </p>
+        )}
+        {!support?.email && !support?.phone && !support?.telegram && (
+          <p className="mt-1 text-amber-100/70">Saytdagi support chat orqali yozing.</p>
+        )}
+      </div>
+    );
   }
 
   function goToApp(data: {
@@ -195,6 +233,7 @@ function LoginForm() {
     e.preventDefault();
     setError("");
     setInfo("");
+    setLocked(false);
     setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {
@@ -202,13 +241,20 @@ function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        message?: string;
+        locked?: boolean;
+        support?: {
+          email?: string | null;
+          phone?: string | null;
+          telegram?: string | null;
+        };
+      };
+      if (data.support) setSupport(data.support);
       if (!res.ok) {
         setError(data.error || "Xatolik yuz berdi");
-        // Kunlik email limiti — baribir reset ekraniga o'tib Telegram taklif qilamiz
-        if (data.useTelegramForResend && email.trim()) {
-          setMode("reset");
-        }
+        setLocked(!!data.locked);
         return;
       }
       setInfo(data.message || "Kod yuborildi");
@@ -220,33 +266,42 @@ function LoginForm() {
     }
   }
 
-  async function handleTelegramResend() {
+  async function handleResendEmail() {
     setError("");
     setInfo("");
+    setLocked(false);
     if (!email.trim()) {
       setError("Avval emailni kiriting");
       return;
     }
-    setTgLoading(true);
+    setLoading(true);
     try {
-      const res = await fetch("/api/auth/forgot-password/telegram", {
+      const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        message?: string;
+        locked?: boolean;
+        support?: {
+          email?: string | null;
+          phone?: string | null;
+          telegram?: string | null;
+        };
+      };
+      if (data.support) setSupport(data.support);
       if (!res.ok) {
-        setError(data.error || "Telegram havola olinmadi");
+        setError(data.error || "Kod yuborilmadi");
+        setLocked(!!data.locked);
         return;
       }
-      setInfo(data.message || "Telegram botga o'ting");
-      if (data.telegramUrl) {
-        window.open(data.telegramUrl, "_blank", "noopener,noreferrer");
-      }
+      setInfo(data.message || "Yangi kod yuborildi");
     } catch {
       setError("Ulanish xatosi");
     } finally {
-      setTgLoading(false);
+      setLoading(false);
     }
   }
 
@@ -254,6 +309,7 @@ function LoginForm() {
     e.preventDefault();
     setError("");
     setInfo("");
+    setLocked(false);
     if (newPassword !== confirmPassword) {
       setError("Parollar mos kelmadi");
       return;
@@ -265,9 +321,20 @@ function LoginForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, code, newPassword }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        message?: string;
+        locked?: boolean;
+        support?: {
+          email?: string | null;
+          phone?: string | null;
+          telegram?: string | null;
+        };
+      };
+      if (data.support) setSupport(data.support);
       if (!res.ok) {
         setError(data.error || "Xatolik yuz berdi");
+        setLocked(!!data.locked);
         return;
       }
       setPassword("");
@@ -420,9 +487,13 @@ function LoginForm() {
               {error}
             </p>
           )}
-          <button type="submit" disabled={loading} className="login-submit">
+          {locked && <SupportBox />}
+          <button type="submit" disabled={loading || locked} className="login-submit">
             {loading ? "Yuborilmoqda..." : "Kodni yuborish"}
           </button>
+          <p className="text-center text-[11px] text-white/40">
+            Kuniga 3 marta. Orada kutish — email spamdan himoya.
+          </p>
           <button
             type="button"
             onClick={() => switchMode("login")}
@@ -438,7 +509,7 @@ function LoginForm() {
           <div className="text-center">
             <h2 className="text-lg font-bold text-white">Yangi parol</h2>
             <p className="mt-1 text-sm text-white/55">
-              {email} ga yuborilgan kodni kiriting
+              {email} ga yuborilgan 6 xonali kodni kiriting (3 urinish)
             </p>
           </div>
           <div className="relative">
@@ -502,21 +573,20 @@ function LoginForm() {
               {info}
             </p>
           )}
-          <button type="submit" disabled={loading} className="login-submit">
+          {locked && <SupportBox />}
+          <button type="submit" disabled={loading || locked} className="login-submit">
             {loading ? "Saqlanmoqda..." : "Parolni yangilash"}
           </button>
           <button
             type="button"
-            onClick={() => void handleTelegramResend()}
-            disabled={loading || tgLoading}
-            className="w-full rounded-2xl border border-sky-400/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-200 transition hover:bg-sky-500/25 disabled:opacity-50"
+            onClick={() => void handleResendEmail()}
+            disabled={loading || locked}
+            className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10 disabled:opacity-50"
           >
-            {tgLoading
-              ? "Telegram ochilmoqda..."
-              : "Kodni qayta olish — Telegram bot"}
+            Kodni qayta yuborish (email)
           </button>
           <p className="text-center text-[11px] text-white/40">
-            Email kuniga 1 marta. Qayta kod — faqat Telegram orqali (maxsus havola).
+            Faqat Gmail/email. 3 marta noto‘g‘ri kod yoki kunlik limit — support.
           </p>
           <div className="flex justify-between gap-3 text-xs">
             <button
@@ -538,24 +608,6 @@ function LoginForm() {
         </form>
       )}
 
-      {mode === "login" && (
-        <details className="login-demo mt-6 group">
-          <summary className="cursor-pointer list-none text-center text-xs text-white/40 transition hover:text-white/60 [&::-webkit-details-marker]:hidden">
-            Demo hisoblar
-          </summary>
-          <div className="mt-3 space-y-1.5 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-xs text-white/55">
-            <p>
-              <span className="text-white/75">Admin:</span> admin@kafe.uz / admin123
-            </p>
-            <p>
-              <span className="text-white/75">Egasi:</span> egasi@demo.uz / admin123
-            </p>
-            <p>
-              <span className="text-white/75">Ofitsiant:</span> ofitsiant@demo.uz / admin123
-            </p>
-          </div>
-        </details>
-      )}
     </LoginScreen>
   );
 }

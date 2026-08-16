@@ -7,6 +7,7 @@ import {
   DashboardCafeBlockedScreen,
   DashboardSubscriptionOnlyShell,
 } from "@/components/dashboard-cafe-blocked-screen";
+import { PasswordSecurityBanner } from "@/components/password-security-banner";
 import type { DashboardCafeAccessState } from "@/lib/dashboard-cafe-access";
 import type { DashboardThemeId } from "@/lib/dashboard-themes";
 
@@ -25,12 +26,14 @@ export function DashboardAccessGate({
   cafe,
   userId,
   userName,
+  warehouseOnly = false,
   children,
 }: {
   cafes: DashboardCafeOption[];
   cafe: DashboardCafeOption | undefined;
   userId: string;
   userName: string;
+  warehouseOnly?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -76,7 +79,16 @@ export function DashboardAccessGate({
   }
 
   return (
-    <DashboardShell cafes={cafes} cafe={cafe} userId={userId} userName={userName}>
+    <DashboardShell
+      cafes={cafes}
+      cafe={cafe}
+      userId={userId}
+      userName={userName}
+      warehouseOnly={warehouseOnly}
+    >
+      {activeCafe && !warehouseOnly ? (
+        <PasswordSecurityBanner cafeId={activeCafe.id} />
+      ) : null}
       {children}
     </DashboardShell>
   );

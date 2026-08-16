@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { UnitCode, WarehouseMovementType } from "@prisma/client";
-import { createStockMovement, getOrCreatePrimaryWarehouse } from "@/lib/warehouse";
+import {
+  createStockMovement,
+  getOrCreatePrimaryWarehouse,
+} from "@/lib/warehouse";
 
 export async function decrementStockForOrder(
   items: { productId: string; quantity: number }[],
@@ -25,7 +28,10 @@ export async function decrementStockForOrder(
 
 export function checkStockAvailable(
   items: { productId: string; quantity: number }[],
-  productMap: Map<string, { trackStock: boolean; stockQty: number | null; name: string }>,
+  productMap: Map<
+    string,
+    { trackStock: boolean; stockQty: number | null; name: string }
+  >,
 ): string | null {
   for (const item of items) {
     const p = productMap.get(item.productId);
@@ -54,29 +60,40 @@ export async function consumeRawMaterialsForOrder(
   const byProduct = new Map(recipes.map((r) => [r.productId, r]));
   const warehouse = await getOrCreatePrimaryWarehouse(cafeId);
 
-  for (const ordered of items) {
-    const recipe = byProduct.get(ordered.productId);
-    if (!recipe) continue;
+  await prisma.$transaction(async (tx) => {
+    for (const ordered of items) {
+      const recipe = byProduct.get(ordered.productId);
+      if (!recipe) continue;
 
-    for (const recipeItem of recipe.items) {
-      const totalQtyBase = recipeItem.qtyBase * ordered.quantity;
-      const totalQty =
-        recipeItem.unit === UnitCode.KG || recipeItem.unit === UnitCode.L
-          ? totalQtyBase / 1000
-          : totalQtyBase;
+      for (const recipeItem of recipe.items) {
+        const wastage = 1 + (recipeItem.wastagePct ?? 0) / 100;
+        const totalQtyBase = Math.ceil(
+          recipeItem.qtyBase * ordered.quantity * wastage,
+        );
+        if (totalQtyBase <= 0) continue;
 
-      await createStockMovement({
-        cafeId,
-        warehouseId: warehouse.id,
-        rawMaterialId: recipeItem.rawMaterialId,
-        productId: ordered.productId,
-        movementType: WarehouseMovementType.ORDER_CONSUMPTION,
-        unit: recipeItem.unit,
-        qty: Math.max(1, Math.round(totalQty)),
-        refType: "ORDER",
-        note: "Buyurtma bo'yicha avtomatik yechildi",
-        actorUserId: actorUserId ?? null,
-      });
+        // Harakat qty Int — KG/L o‘rniga G/ML (base) yozamiz
+        let unit = recipeItem.unit;
+        let qty = totalQtyBase;
+        if (unit === UnitCode.KG) unit = UnitCode.G;
+        else if (unit === UnitCode.L) unit = UnitCode.ML;
+        else qty = Math.max(1, totalQtyBase);
+
+        await createStockMovement({
+          tx,
+          cafeId,
+          warehouseId: warehouse.id,
+          rawMaterialId: recipeItem.rawMaterialId,
+          productId: ordered.productId,
+          movementType: WarehouseMovementType.ORDER_CONSUMPTION,
+          unit,
+          qty,
+          consumeFefo: true,
+          refType: "ORDER",
+          note: "Buyurtma bo'yicha avtomatik yechildi",
+          actorUserId: actorUserId ?? null,
+        });
+      }
     }
-  }
+  });
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import {
   ArrowRight,
   BarChart3,
@@ -20,6 +21,30 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { PricingSection } from "@/components/pricing-section";
 import { PlatformSocialIcons } from "@/components/platform-social-icons";
 import { NooklineMark } from "@/components/nookline-mark";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OG_IMAGE,
+  SITE_TITLE,
+  getSeoSiteUrl,
+} from "@/lib/site-seo";
+
+const siteUrl = getSeoSiteUrl();
+
+export const metadata: Metadata = {
+  title: {
+    absolute: SITE_TITLE,
+  },
+  description: SITE_DESCRIPTION,
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    url: siteUrl,
+    siteName: SITE_NAME,
+    images: [{ url: SITE_OG_IMAGE, alt: SITE_NAME }],
+  },
+};
 
 const features = [
   {

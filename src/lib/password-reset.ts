@@ -2,12 +2,18 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { isEmailConfigured, sendPasswordResetCode } from "@/lib/email";
-import { getTelegramBotToken, getTelegramBotUsername, sendTelegramMessage } from "@/lib/telegram";
+import { getPlatformSettings } from "@/lib/platform-settings";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const CODE_TTL_MS = 15 * 60 * 1000;
-const LINK_TTL_MS = 15 * 60 * 1000;
-const EMAIL_DAILY_MS = 24 * 60 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
+/** Bitta kod uchun noto‘g‘ri urinishlar */
+const MAX_CODE_ATTEMPTS = 3;
+/** 24 soatda bir emailga maksimal yuborish */
+const MAX_SENDS_PER_DAY = 3;
+/** Yuborishlar orasidagi minimal kutish (soniya) — spamdan himoya */
+const SEND_COOLDOWNS_SEC = [0, 180, 900]; // 0 → 3 daq → 15 daq
+/** Butun platforma SMTP (Gmail) — soatiga */
+const GLOBAL_SMTP_PER_HOUR = 40;
 
 function hashCode(code: string) {
   return crypto.createHash("sha256").update(code).digest("hex");
@@ -33,8 +39,27 @@ async function latestOpenToken(userId: string) {
   });
 }
 
-async function countEmailResetsLastDay(userId: string) {
-  const since = new Date(Date.now() - EMAIL_DAILY_MS);
+export async function getPasswordResetSupportContact() {
+  const s = await getPlatformSettings();
+  return {
+    email: s.contactEmail?.trim() || null,
+    phone: (s.supportPhone?.trim() || s.contactPhone?.trim()) || null,
+    telegram: process.env.TELEGRAM_SUPPORT_BOT_USERNAME?.replace(/^@/, "").trim() || null,
+  };
+}
+
+function supportHint(contact: Awaited<ReturnType<typeof getPasswordResetSupportContact>>) {
+  const parts: string[] = [];
+  if (contact.email) parts.push(`email: ${contact.email}`);
+  if (contact.phone) parts.push(`tel: ${contact.phone}`);
+  if (contact.telegram) parts.push(`Telegram: @${contact.telegram}`);
+  return parts.length
+    ? `Support: ${parts.join(" · ")}`
+    : "Supportga murojaat qiling (sayt orqali).";
+}
+
+async function countEmailSendsLastDay(userId: string) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   return prisma.passwordResetToken.count({
     where: {
       userId,
@@ -44,188 +69,128 @@ async function countEmailResetsLastDay(userId: string) {
   });
 }
 
-async function insertResetCode(userId: string, channel: "EMAIL" | "TELEGRAM") {
+async function lastEmailSendAt(userId: string) {
+  const row = await prisma.passwordResetToken.findFirst({
+    where: { userId, channel: "EMAIL" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return row?.createdAt ?? null;
+}
+
+async function insertResetCode(userId: string) {
   const code = generateCode();
   await prisma.passwordResetToken.create({
     data: {
       userId,
       codeHash: hashCode(code),
       expiresAt: new Date(Date.now() + CODE_TTL_MS),
-      channel,
+      channel: "EMAIL",
     },
   });
   return code;
 }
 
 export async function requestPasswordReset(emailRaw: string) {
+  const support = await getPasswordResetSupportContact();
+
   if (!isEmailConfigured()) {
     return {
       ok: false as const,
-      error: "Email yuborish hozircha sozlanmagan. Qo'llab-quvvatlashga murojaat qiling.",
+      error: "Email yuborish hozircha sozlanmagan. " + supportHint(support),
       status: 503,
+      support,
+      locked: true as const,
     };
   }
 
   const user = await findUserByEmail(emailRaw);
-  // Email bor-yo'qligini ochib yubormaslik
-  if (!user) {
-    return {
-      ok: true as const,
-      message: "Agar email ro'yxatdan o'tgan bo'lsa, kod yuborildi.",
-      emailSent: false as const,
-      useTelegramForResend: true as const,
-    };
-  }
-
-  const emailCount = await countEmailResetsLastDay(user.id);
-  if (emailCount >= 1) {
-    return {
-      ok: false as const,
-      error:
-        "Bugun email orqali kod allaqachon yuborilgan. Qayta olish uchun Telegram botdan foydalaning.",
-      status: 429,
-      useTelegramForResend: true as const,
-    };
-  }
-
-  const code = await insertResetCode(user.id, "EMAIL");
-
-  try {
-    await sendPasswordResetCode(user.email, code);
-  } catch (err) {
-    console.error("[password-reset] email send failed", err);
-    return {
-      ok: false as const,
-      error: "Email yuborilmadi. SMTP / Gmail sozlamalarini tekshiring.",
-      status: 502,
-    };
-  }
-
-  return {
-    ok: true as const,
-    message:
-      "Agar email ro'yxatdan o'tgan bo'lsa, kod yuborildi. Qayta kerak bo'lsa — Telegram orqali oling.",
-    emailSent: true as const,
-    useTelegramForResend: true as const,
-  };
-}
-
-/** Kodni qayta olish — Telegram deep-link */
-export async function createTelegramPasswordResetLink(emailRaw: string) {
-  const botUser = await getTelegramBotUsername("support");
-  if (!botUser || !getTelegramBotToken("support")) {
-    return {
-      ok: false as const,
-      error: "Telegram bot hozircha sozlanmagan. Keyinroq urinib ko'ring.",
-      status: 503,
-    };
-  }
-
-  const user = await findUserByEmail(emailRaw);
-  // Enumeration himoyasi — havola faqat mavjud user uchun, lekin javob umumiy
+  // Enumeration himoyasi — mavjud bo‘lmasa ham umumiy javob
   if (!user) {
     return {
       ok: true as const,
       message:
-        "Agar email ro'yxatdan o'tgan bo'lsa, Telegram bot orqali kod olishingiz mumkin.",
-      telegramUrl: `https://t.me/${botUser}?start=help_reset`,
+        "Agar email ro‘yxatdan o‘tgan bo‘lsa, kod yuborildi. Kelmasa spam papkani tekshiring.",
+      emailSent: false as const,
+      sendsLeft: MAX_SENDS_PER_DAY,
+      support,
     };
   }
 
-  const id = crypto.randomBytes(16).toString("hex"); // 32 hex → start=rst_xxx < 64
+  const sendsToday = await countEmailSendsLastDay(user.id);
+  if (sendsToday >= MAX_SENDS_PER_DAY) {
+    return {
+      ok: false as const,
+      error:
+        "Bugungi 3 ta kod so‘rovi tugadi. Hisobni tiklash uchun supportga murojaat qiling.",
+      status: 429,
+      locked: true as const,
+      support,
+      sendsLeft: 0,
+    };
+  }
 
-  await prisma.telegramPasswordLink.create({
-    data: {
-      id,
-      userId: user.id,
-      expiresAt: new Date(Date.now() + LINK_TTL_MS),
-    },
+  const lastAt = await lastEmailSendAt(user.id);
+  const cooldownSec = SEND_COOLDOWNS_SEC[Math.min(sendsToday, SEND_COOLDOWNS_SEC.length - 1)] ?? 900;
+  if (lastAt && cooldownSec > 0) {
+    const elapsed = (Date.now() - lastAt.getTime()) / 1000;
+    if (elapsed < cooldownSec) {
+      const wait = Math.ceil(cooldownSec - elapsed);
+      return {
+        ok: false as const,
+        error: `Keyingi kodni ${wait} soniyadan keyin so‘rash mumkin (email spamdan himoya).`,
+        status: 429,
+        retryAfterSec: wait,
+        sendsLeft: MAX_SENDS_PER_DAY - sendsToday,
+        support,
+      };
+    }
+  }
+
+  // Global SMTP — Gmail akkaunt spamga tushmasin; yuk yuqori bo‘lsa kutish
+  const global = checkRateLimit({
+    key: "forgot:smtp:global",
+    limit: GLOBAL_SMTP_PER_HOUR,
+    windowMs: 60 * 60 * 1000,
   });
+  if (!global.ok) {
+    // So‘rovlarni vaqt bo‘yicha tarqatish
+    const stagger = Math.min(global.retryAfterSec, 900);
+    return {
+      ok: false as const,
+      error: `Hozir ko‘p so‘rov bor. Taxminan ${stagger} soniyadan keyin qayta urinib ko‘ring.`,
+      status: 429,
+      retryAfterSec: stagger,
+      sendsLeft: MAX_SENDS_PER_DAY - sendsToday,
+      support,
+    };
+  }
 
-  const telegramUrl = `https://t.me/${botUser}?start=rst_${id}`;
+  const code = await insertResetCode(user.id);
 
+  try {
+    await sendPasswordResetCode(user.email, code);
+  } catch (err) {
+    console.error("[requestPasswordReset] email", err);
+    return {
+      ok: false as const,
+      error: "Email yuborilmadi. Keyinroq urinib ko‘ring yoki supportga yozing.",
+      status: 502,
+      support,
+    };
+  }
+
+  const left = MAX_SENDS_PER_DAY - sendsToday - 1;
   return {
     ok: true as const,
     message:
-      "Telegram botni oching — havola orqali tasdiqlang, kod shu yerga yuboriladi.",
-    telegramUrl,
+      left > 0
+        ? `Kod emailga yuborildi. Bugun yana ${left} marta so‘rash mumkin.`
+        : "Kod emailga yuborildi. Bugungi so‘rovlar tugadi — kelmasa supportga murojaat qiling.",
+    emailSent: true as const,
+    sendsLeft: left,
+    support,
   };
-}
-
-/** Webhook: /start rst_<token> */
-export async function fulfillTelegramPasswordReset(
-  linkId: string,
-  chatId: string,
-) {
-  const link = await prisma.telegramPasswordLink.findUnique({
-    where: { id: linkId },
-    include: { user: { select: { email: true, name: true } } },
-  });
-
-  if (!link) {
-    await sendTelegramMessage(
-      chatId,
-      "Havola topilmadi yoki eskirgan. Saytdan qayta «Kodni qayta olish (Telegram)» ni bosing.",
-      { bot: "support" },
-    );
-    return { ok: false as const };
-  }
-
-  if (link.usedAt) {
-    await sendTelegramMessage(
-      chatId,
-      "Bu havola allaqachon ishlatilgan. Saytdan yangi havola oling.",
-      { bot: "support" },
-    );
-    return { ok: false as const };
-  }
-
-  if (link.expiresAt.getTime() < Date.now()) {
-    await sendTelegramMessage(
-      chatId,
-      "Havola muddati tugagan (15 daqiqa). Saytdan qayta so'rang.",
-      { bot: "support" },
-    );
-    return { ok: false as const };
-  }
-
-  await prisma.$transaction([
-    prisma.telegramPasswordLink.update({
-      where: { id: link.id },
-      data: { usedAt: new Date() },
-    }),
-    prisma.user.update({
-      where: { id: link.userId },
-      data: { telegramChatId: chatId },
-    }),
-  ]);
-
-  const code = await insertResetCode(link.userId, "TELEGRAM");
-
-  const sent = await sendTelegramMessage(
-    chatId,
-    [
-      `🔐 <b>Parol tiklash kodi</b>`,
-      "",
-      `Email: <code>${link.user.email}</code>`,
-      `Kod: <code>${code}</code>`,
-      "",
-      `⏱ ${Math.floor(CODE_TTL_MS / 60000)} daqiqa ichida saytda kiriting.`,
-      "Kodni hech kimga bermang.",
-    ].join("\n"),
-    { bot: "support" },
-  );
-
-  if (!sent.ok) {
-    await sendTelegramMessage(
-      chatId,
-      "Kod yuborishda xatolik. Keyinroq qayta urinib ko'ring.",
-      { bot: "support" },
-    );
-    return { ok: false as const };
-  }
-
-  return { ok: true as const };
 }
 
 export async function resetPasswordWithCode(input: {
@@ -233,6 +198,7 @@ export async function resetPasswordWithCode(input: {
   code: string;
   newPassword: string;
 }) {
+  const support = await getPasswordResetSupportContact();
   const code = input.code.trim().replace(/\s/g, "");
   const newPassword = input.newPassword;
 
@@ -257,33 +223,61 @@ export async function resetPasswordWithCode(input: {
     return { ok: false as const, error: "Kod noto'g'ri yoki muddati o'tgan", status: 400 };
   }
 
-  if (token.attempts >= MAX_ATTEMPTS) {
+  if (token.attempts >= MAX_CODE_ATTEMPTS) {
+    await prisma.passwordResetToken.update({
+      where: { id: token.id },
+      data: { usedAt: new Date() },
+    });
     return {
       ok: false as const,
-      error: "Urinishlar soni tugadi. Yangi kodni Telegram orqali oling.",
+      error:
+        "3 ta noto‘g‘ri urinish. Yangi kod so‘rang yoki supportga murojaat qiling.",
       status: 429,
+      locked: true as const,
+      support,
     };
   }
 
   if (token.codeHash !== hashCode(code)) {
+    const next = token.attempts + 1;
     await prisma.passwordResetToken.update({
       where: { id: token.id },
-      data: { attempts: { increment: 1 } },
+      data: {
+        attempts: next,
+        ...(next >= MAX_CODE_ATTEMPTS ? { usedAt: new Date() } : {}),
+      },
     });
-    return { ok: false as const, error: "Kod noto'g'ri yoki muddati o'tgan", status: 400 };
+    if (next >= MAX_CODE_ATTEMPTS) {
+      return {
+        ok: false as const,
+        error:
+          "3 ta noto‘g‘ri urinish tugadi. Yangi kod so‘rang yoki supportga murojaat qiling.",
+        status: 429,
+        locked: true as const,
+        support,
+      };
+    }
+    return {
+      ok: false as const,
+      error: `Kod noto‘g‘ri. Qolgan urinish: ${MAX_CODE_ATTEMPTS - next}`,
+      status: 400,
+      attemptsLeft: MAX_CODE_ATTEMPTS - next,
+    };
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
+  const now = new Date();
 
   await prisma.$transaction([
     prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: { passwordHash, passwordChangedAt: now },
     }),
     prisma.passwordResetToken.updateMany({
       where: { userId: user.id, usedAt: null },
-      data: { usedAt: new Date() },
+      data: { usedAt: now },
     }),
+    prisma.session.deleteMany({ where: { userId: user.id } }),
   ]);
 
   return { ok: true as const, message: "Parol yangilandi. Endi kiring." };

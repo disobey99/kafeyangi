@@ -759,8 +759,8 @@ export function PlatformCafesTable({
               {pwCafe.owner.name} ({pwCafe.owner.email})
             </p>
             <p className="mt-1 text-xs text-stone-500">
-              Mijoz parolini unutgan bo&apos;lsa yangisini o&apos;rnating. Ko&apos;z
-              tugmasi bilan ochiq ko&apos;ring, keyin nusxa olib bering.
+              Kirib bo&apos;lmayotgan kafe egasi uchun yangi parol (kod) qo&apos;ying.
+              Eski sessiyalar yopiladi — nusxa olib egaga bering.
             </p>
             {!revealedOwnerPassword ? (
               <div className="mt-4">

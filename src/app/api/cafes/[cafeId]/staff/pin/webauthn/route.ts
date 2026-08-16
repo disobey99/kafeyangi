@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
@@ -78,9 +79,11 @@ export async function GET(
       userID: uint8FromUserId(access.session.userId) as any,
       attestationType: "none",
       timeout: 120_000,
-      excludeCredentials: member.webauthnCredentialId
-        ? [{ id: member.webauthnCredentialId }]
-        : [],
+      excludeCredentials:
+        member.webauthnCredentialId &&
+        !isNativeBioCredential(member.webauthnCredentialId)
+          ? [{ id: member.webauthnCredentialId }]
+          : [],
       authenticatorSelection: {
         authenticatorAttachment: "platform",
         userVerification: "required",
@@ -104,6 +107,12 @@ export async function GET(
     if (!member.webauthnCredentialId || !member.webauthnPublicKey) {
       return NextResponse.json(
         { error: "Barmoq izi o'rnatilmagan" },
+        { status: 400 },
+      );
+    }
+    if (isNativeBioCredential(member.webauthnCredentialId)) {
+      return NextResponse.json(
+        { error: "APK biometriya — native-authenticate ishlating", native: true },
         { status: 400 },
       );
     }
@@ -138,9 +147,25 @@ const bodySchema = z.discriminatedUnion("action", [
     response: z.record(z.string(), z.unknown()),
   }),
   z.object({
+    action: z.literal("native-register"),
+    secret: z.string().min(32).max(128),
+  }),
+  z.object({
+    action: z.literal("native-authenticate"),
+    secret: z.string().min(32).max(128),
+  }),
+  z.object({
     action: z.literal("disable"),
   }),
 ]);
+
+function isNativeBioCredential(id: string | null | undefined) {
+  return Boolean(id?.startsWith("native:"));
+}
+
+function hashNativeSecret(secret: string) {
+  return createHash("sha256").update(`nookline-native-bio:${secret}`).digest("hex");
+}
 
 export async function POST(
   request: Request,
@@ -188,6 +213,47 @@ export async function POST(
       },
     });
     return NextResponse.json({ ok: true, hasBiometric: false });
+  }
+
+  if (body.action === "native-register") {
+    const unlocked = await isPinUnlocked(cafeId, access.session.userId);
+    if (!unlocked) {
+      return NextResponse.json(
+        { error: "Avval PIN bilan oching" },
+        { status: 403 },
+      );
+    }
+    const secretHash = hashNativeSecret(body.secret);
+    await prisma.cafeMember.update({
+      where: { id: member.id },
+      data: {
+        webauthnCredentialId: `native:${access.session.userId}`,
+        webauthnPublicKey: secretHash,
+        webauthnCounter: 0,
+      },
+    });
+    return NextResponse.json({ ok: true, hasBiometric: true, mode: "native" });
+  }
+
+  if (body.action === "native-authenticate") {
+    if (
+      !isNativeBioCredential(member.webauthnCredentialId) ||
+      !member.webauthnPublicKey
+    ) {
+      return NextResponse.json(
+        { error: "Barmoq izi o'rnatilmagan" },
+        { status: 400 },
+      );
+    }
+    const secretHash = hashNativeSecret(body.secret);
+    if (secretHash !== member.webauthnPublicKey) {
+      return NextResponse.json(
+        { error: "Barmoq izi tasdiqlanmadi" },
+        { status: 401 },
+      );
+    }
+    await setPinUnlockCookie(cafeId, access.session.userId);
+    return NextResponse.json({ ok: true, unlocked: true, mode: "native" });
   }
 
   if (body.action === "register") {

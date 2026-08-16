@@ -22,6 +22,32 @@ enum PlatformStaffRole {
   ANALYST
 }
 
+enum ShopProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ShopDiscountType {
+  PERCENT
+  FIXED
+}
+
+enum ShopOrderStatus {
+  NEW
+  CONFIRMED
+  CANCELLED
+  DONE
+}
+
+enum ShopStockMoveType {
+  IN
+  OUT
+  ADJUST
+  SALE
+  REFUND
+}
+
 enum CafeStatus {
   TRIAL
   ACTIVE
@@ -54,6 +80,8 @@ enum CafeRole {
   WAITER
   KITCHEN
   COURIER
+  /** Omborchi — faqat ombor moduli */
+  WAREHOUSE
 }
 
 enum OrderStatus {
@@ -184,6 +212,8 @@ model User {
   avatarUrl    String?  // xodim profil rasmi URL manzili
   /** Parol tiklash / bildirishnomalar uchun Telegram chat */
   telegramChatId String?
+  /** Oxirgi marta parol o‘zgartirilgan vaqt (null = hech qachon / noma’lum) */
+  passwordChangedAt DateTime?
   globalRole   GlobalRole @default(USER)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -199,7 +229,6 @@ model User {
   trustedDevices    TrustedDevice[]
   loginApprovals    LoginApprovalRequest[]
   passwordResets    PasswordResetToken[]
-  telegramPasswordLinks TelegramPasswordLink[]
   platformStaff     PlatformStaff?
   notifications     AppNotification[]
   staffRatingsReceived StaffRating[] @relation("StaffRatingsReceived")
@@ -293,7 +322,7 @@ model PasswordResetToken {
   expiresAt DateTime
   attempts  Int      @default(0)
   usedAt    DateTime?
-  /** EMAIL | TELEGRAM */
+  /** EMAIL */
   channel   String   @default("EMAIL")
   createdAt DateTime @default(now())
 
@@ -301,19 +330,6 @@ model PasswordResetToken {
 
   @@index([userId, createdAt])
   @@index([userId, channel, createdAt])
-}
-
-/** Parol tiklash — Telegram deep-link (start=rst_xxx) */
-model TelegramPasswordLink {
-  id        String   @id
-  userId    String
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
 }
 
 // ─── Organization (Multi-branch) ─────────────────────────────────────────────
@@ -1513,4 +1529,156 @@ model InventoryAuditLog {
 
   @@index([cafeId, createdAt])
   @@index([entityType, entityId])
+}
+
+// ─── Platform Onlayn do‘kon (Shopping) ───────────────────────────────────────
+
+model ShopCategory {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  imageUrl    String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products ShopProduct[]
+
+  @@index([sortOrder])
+}
+
+model ShopProduct {
+  id             String            @id @default(cuid())
+  categoryId     String?
+  name           String
+  slug           String            @unique
+  description    String?
+  imageUrl       String?
+  /** Tiyin (so‘m * 100) */
+  price          Int
+  /** Eski narx (chegirma ko‘rsatish) — tiyin */
+  compareAtPrice Int?
+  stock          Int               @default(0)
+  /** Shu qiymatdan past/teng — kam qoldiq ogohlantirish */
+  lowStockAt     Int               @default(5)
+  sku            String?
+  status         ShopProductStatus @default(DRAFT)
+  featured       Boolean           @default(false)
+  sortOrder      Int               @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  category       ShopCategory?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  discounts      ShopDiscountProduct[]
+  stockMovements ShopStockMovement[]
+
+  @@index([status, sortOrder])
+  @@index([categoryId])
+  @@index([featured])
+  @@index([stock])
+}
+
+model ShopDiscount {
+  id             String           @id @default(cuid())
+  name           String
+  code           String?          @unique
+  type           ShopDiscountType
+  /** PERCENT: 1–100; FIXED: tiyin */
+  value          Int
+  startsAt       DateTime?
+  endsAt         DateTime?
+  isActive       Boolean          @default(true)
+  minOrderAmount Int?
+  maxUses        Int?
+  usedCount      Int              @default(0)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  products ShopDiscountProduct[]
+
+  @@index([isActive, startsAt, endsAt])
+}
+
+model ShopDiscountProduct {
+  discountId String
+  productId  String
+
+  discount ShopDiscount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  product  ShopProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([discountId, productId])
+  @@index([productId])
+}
+
+model ShopOrder {
+  id             String          @id @default(cuid())
+  customerName   String
+  customerPhone  String
+  customerNote   String?
+  status         ShopOrderStatus @default(NEW)
+  /** Tiyin */
+  total          Int
+  /** Bekor qilinganda ombor qaytarilganmi */
+  stockRestored  Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  items ShopOrderItem[]
+
+  @@index([status, createdAt])
+}
+
+model ShopOrderItem {
+  id          String @id @default(cuid())
+  orderId     String
+  productId   String?
+  productName String
+  /** Tiyin */
+  unitPrice   Int
+  qty         Int    @default(1)
+
+  order ShopOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model ShopStockMovement {
+  id           String            @id @default(cuid())
+  productId    String
+  type         ShopStockMoveType
+  /** Harakat miqdori (musbat) */
+  qty          Int
+  /** stock ga qo‘shilgan delta (+/−) */
+  delta        Int
+  balanceAfter Int
+  note         String?
+  orderId      String?
+  actorUserId  String?
+  createdAt    DateTime          @default(now())
+
+  product ShopProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([type, createdAt])
+  @@index([orderId])
+}
+
+/// Raw SQL orqali ham yuritiladi (support bot) — schema sync uchun
+model TelegramBotSession {
+  chatId    String   @id
+  userId    String?
+  cafeId    String?
+  mode      String   @default("menu")
+  updatedAt DateTime @default(now())
+}
+
+model TelegramOwnerLink {
+  id        String    @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 }

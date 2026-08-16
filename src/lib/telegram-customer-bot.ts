@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getConfiguredAppUrl } from "@/lib/app-url";
+import { getConfiguredAppUrl, PRODUCTION_APP_URL } from "@/lib/app-url";
 import {
   getTelegramBotUsername,
   getTelegramWebAppUrl,
@@ -17,7 +17,7 @@ function sendTelegramMessage(
 }
 
 function appBaseUrl() {
-  return getConfiguredAppUrl();
+  return getConfiguredAppUrl() || PRODUCTION_APP_URL;
 }
 
 /** Mijoz ilova havolasi — Telegram tugmasi uchun absolute URL */
@@ -53,7 +53,7 @@ function cafeCustomerKeyboard(slug: string): TelegramInlineButton[][] {
 function customerHomeKeyboard(): TelegramInlineButton[][] {
   return [
     [{ text: "🔍 Kafelarni ko‘rish", callback_data: "cust_cafes" }],
-    [{ text: "ℹ️ Qanday ishlaydi?", callback_data: "cust_about" }],
+    [{ text: "ℹ️ Qanday buyurtma beriladi?", callback_data: "cust_about" }],
   ];
 }
 
@@ -120,16 +120,25 @@ export async function sendCustomerCafeWelcome(
   return true;
 }
 
-/** Botni qidirib Start — faqat mijoz oqimi (support matnlari yo'q) */
+/** Botni qidirib Start — faqat mijoz buyurtma oqimi */
 export async function sendCustomerBareStart(chatId: string) {
+  const support = process.env.TELEGRAM_SUPPORT_BOT_USERNAME?.replace(
+    /^@/,
+    "",
+  ).trim();
   await sendTelegramMessage(
     chatId,
     [
-      "👋 <b>NOOKLINE</b> — online buyurtma",
+      "🛒 <b>NOOKLINE</b> — mijoz buyurtma boti",
       "",
+      "Bu yerda kafedan online buyurtma beriladi.",
       "Kafe tanlang yoki kafe saytidagi «Telegramda buyurtma» tugmasini bosing.",
-      "Buyurtma Web App / ilova orqali beriladi.",
-    ].join("\n"),
+      support
+        ? `\nBiznes / kafe egasi uchun: @${support}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
     { inlineKeyboard: customerHomeKeyboard() },
   );
 }

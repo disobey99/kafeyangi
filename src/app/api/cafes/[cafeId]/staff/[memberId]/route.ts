@@ -7,7 +7,7 @@ import { replaceLocalUpload } from "@/lib/uploads";
 
 const updateSchema = z.object({
   isActive: z.boolean().optional(),
-  role: z.enum(["MANAGER", "CASHIER", "WAITER", "KITCHEN", "COURIER"]).optional(),
+  role: z.enum(["MANAGER", "CASHIER", "WAITER", "KITCHEN", "COURIER", "WAREHOUSE"]).optional(),
   salarySom: z.number().min(0).optional(),
   avatarUrl: z
     .union([z.string().max(800), z.literal(""), z.null()])

@@ -14,8 +14,10 @@ import { requestStaffNotificationPermission } from "@/lib/staff-local-notify";
 import {
   clearPushPromptSnooze,
   getPushPromptDismissedAt,
+  markPushPromptModalDone,
   pushLimitationsForRole,
   shouldShowPushPrompt,
+  shouldShowPushPromptModal,
   snoozePushPrompt,
 } from "@/lib/staff-push-prompt";
 
@@ -57,21 +59,19 @@ export function StaffPushPrompt({
     if (!pushSupported) {
       setPermission("unsupported");
       if (isOrderSoundEnabled()) {
+        markPushPromptModalDone();
         setOpen(false);
         setCompact(false);
         setPushEnabled(true);
         setReady(true);
         return;
       }
-      const dismissedAt = getPushPromptDismissedAt();
-      // Modal faqat birinchi marta / snooze tugaganda
-      const wantModal = shouldShowPushPrompt({
-        pushSupported: true,
+      const wantModal = shouldShowPushPromptModal({
         pushEnabled: false,
         permission: "default",
       });
-      setOpen(wantModal && !dismissedAt && !minimizedNow);
-      setCompact(true); // snooze bo'lsa ham banner qoladi
+      setOpen(wantModal && !minimizedNow);
+      setCompact(!wantModal || !!getPushPromptDismissedAt());
       setPushEnabled(false);
       setReady(true);
       return;
@@ -79,6 +79,11 @@ export function StaffPushPrompt({
 
     const perm = Notification.permission;
     setPermission(perm);
+
+    // Brauzer ruxsati bor — modal hech qachon qayta chiqmasin
+    if (perm === "granted") {
+      markPushPromptModalDone();
+    }
 
     let enabled = isPushEnabledLocally() && perm === "granted";
     if (enabled) {
@@ -93,27 +98,39 @@ export function StaffPushPrompt({
       return;
     }
 
-    // Yoqilmagan — doim eslatma (banner yoki modal)
-    const wantModal = shouldShowPushPrompt({
+    if (perm === "granted") {
+      // Ruxsat bor, push to'liq bo'lmasa ham — modal yo'q (faqat ixtiyoriy banner yo'q)
+      setOpen(false);
+      setCompact(false);
+      setReady(true);
+      return;
+    }
+
+    const wantModal =
+      shouldShowPushPromptModal({
+        pushEnabled: enabled,
+        permission: perm,
+      }) && !minimizedNow;
+
+    const wantBanner = shouldShowPushPrompt({
       pushSupported: true,
       pushEnabled: enabled,
       permission: perm,
     });
 
     if (perm === "denied") {
-      // Bloklangan — modal yoki banner
-      setOpen(wantModal && !minimizedNow);
-      setCompact(true);
+      setOpen(wantModal);
+      setCompact(!wantModal && wantBanner);
       setReady(true);
       return;
     }
 
-    if (wantModal && !minimizedNow) {
+    if (wantModal) {
       setOpen(true);
       setCompact(false);
     } else {
       setOpen(false);
-      setCompact(true);
+      setCompact(wantBanner);
     }
     setReady(true);
   }, [cafeId, pushSupported]);
@@ -181,6 +198,7 @@ export function StaffPushPrompt({
           return;
         }
         clearPushPromptSnooze();
+        markPushPromptModalDone();
         setOpen(false);
         setCompact(false);
         clearMinimized();
@@ -195,6 +213,7 @@ export function StaffPushPrompt({
         // APKda LocalNotifications ishlashi mumkin
         if (nativeOk) {
           clearPushPromptSnooze();
+          markPushPromptModalDone();
           setPushEnabled(true);
           setOpen(false);
           setCompact(false);
@@ -211,6 +230,7 @@ export function StaffPushPrompt({
       if (!result.ok) {
         if (nativeOk) {
           clearPushPromptSnooze();
+          markPushPromptModalDone();
           setPushEnabled(true);
           setOpen(false);
           setCompact(false);
@@ -222,6 +242,7 @@ export function StaffPushPrompt({
       }
 
       clearPushPromptSnooze();
+      markPushPromptModalDone();
       setPushEnabled(true);
       setOpen(false);
       setCompact(false);
@@ -234,6 +255,7 @@ export function StaffPushPrompt({
 
   function later() {
     snoozePushPrompt();
+    markPushPromptModalDone();
     setOpen(false);
     setCompact(true);
     // Modal yopiladi, sariq banner qoladi
@@ -241,7 +263,8 @@ export function StaffPushPrompt({
   }
 
   if (!ready) return null;
-  if (pushEnabled && (permission === "granted" || !pushSupported)) return null;
+  if (permission === "granted") return null;
+  if (pushEnabled && !pushSupported) return null;
 
   const title =
     role === "cashier"

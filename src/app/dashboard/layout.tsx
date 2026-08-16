@@ -3,6 +3,7 @@ import { DashboardAccessGate } from "@/components/dashboard-access-gate";
 import { getUserCafes } from "@/lib/branches";
 import { enforceBillingGraceForCafe } from "@/lib/customer-cafe-gate";
 import { getDashboardCafeAccessState } from "@/lib/dashboard-cafe-access";
+import { isWarehouseOnlyViewer } from "@/lib/dashboard-viewer";
 
 export default async function DashboardLayout({
   children,
@@ -10,6 +11,7 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await requireDashboardAccess();
+  const warehouseOnly = await isWarehouseOnlyViewer(session.userId);
   const rawCafes = await getUserCafes(session.userId);
 
   for (const cafe of rawCafes) {
@@ -34,6 +36,7 @@ export default async function DashboardLayout({
       cafe={cafe}
       userId={session.userId}
       userName={session.name}
+      warehouseOnly={warehouseOnly}
     >
       {children}
     </DashboardAccessGate>

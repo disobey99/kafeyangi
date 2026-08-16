@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { UnitCode, UnitKind } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireCafeManager } from "@/lib/cafe-access";
+import { requireCafeInventory } from "@/lib/cafe-access";
 import { checkPlanFeature } from "@/lib/plan-access";
 
 const createSchema = z.object({
@@ -20,7 +20,7 @@ export async function GET(
   { params }: { params: Promise<{ cafeId: string }> },
 ) {
   const { cafeId } = await params;
-  const access = await requireCafeManager(cafeId);
+  const access = await requireCafeInventory(cafeId);
   if (!access.ok) return access.response;
 
   const feature = await checkPlanFeature(cafeId, "inventoryRation");
@@ -39,7 +39,7 @@ export async function POST(
 ) {
   try {
     const { cafeId } = await params;
-    const access = await requireCafeManager(cafeId);
+    const access = await requireCafeInventory(cafeId);
     if (!access.ok) return access.response;
 
     const feature = await checkPlanFeature(cafeId, "inventoryRation");

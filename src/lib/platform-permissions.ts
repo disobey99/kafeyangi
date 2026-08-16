@@ -9,10 +9,12 @@ export const PLATFORM_PERMISSION_KEYS = [
   "menu.payments",
   "menu.map",
   "menu.reports",
+  "menu.shopping",
   "menu.support",
   "menu.settings",
   "action.cafes.manage",
   "action.payments.manage",
+  "action.shopping.manage",
   "action.support.reply",
   "action.settings.edit",
   "flag.hide_revenue",
@@ -33,6 +35,7 @@ export const PLATFORM_PERMISSION_DEFS: PlatformPermissionDef[] = [
   { key: "menu.payments", label: "To'lovlar va obunalar", group: "Menyu" },
   { key: "menu.map", label: "Xarita", group: "Menyu" },
   { key: "menu.reports", label: "Hisobotlar", group: "Menyu" },
+  { key: "menu.shopping", label: "Shopping (onlayn do‘kon)", group: "Menyu" },
   { key: "menu.support", label: "Qo'llab-quvvatlash", group: "Menyu" },
   { key: "menu.settings", label: "Sozlamalar", group: "Menyu" },
   {
@@ -43,6 +46,11 @@ export const PLATFORM_PERMISSION_DEFS: PlatformPermissionDef[] = [
   {
     key: "action.payments.manage",
     label: "To'lov / obunani boshqarish",
+    group: "Amallar",
+  },
+  {
+    key: "action.shopping.manage",
+    label: "Shopping: mahsulot / narx / chegirma",
     group: "Amallar",
   },
   {
@@ -84,10 +92,12 @@ export const ROLE_PERMISSION_PRESETS: Record<PlatformStaffRole, PlatformPermissi
     "menu.payments",
     "menu.map",
     "menu.reports",
+    "menu.shopping",
     "menu.support",
     "menu.settings",
     "action.cafes.manage",
     "action.payments.manage",
+    "action.shopping.manage",
     "action.support.reply",
     "action.settings.edit",
   ],
@@ -100,6 +110,7 @@ const NAV_PERMISSION: Record<string, PlatformPermission | "super"> = {
   "/platform/payments": "menu.payments",
   "/platform/map": "menu.map",
   "/platform/reports": "menu.reports",
+  "/platform/shopping": "menu.shopping",
   "/platform/support": "menu.support",
   "/platform/settings": "menu.settings",
   "/platform/staff": "super",
@@ -163,7 +174,11 @@ export function navAllowedForPermissions(
   href: string,
   perms: PlatformAccessPerms,
 ): boolean {
-  const need = NAV_PERMISSION[href];
+  const need =
+    NAV_PERMISSION[href] ??
+    Object.entries(NAV_PERMISSION).find(
+      ([path]) => path !== "/platform" && href.startsWith(path + "/"),
+    )?.[1];
   if (!need) return perms === "ALL";
   if (need === "super") return perms === "ALL";
   return hasPlatformPermission(perms, need);

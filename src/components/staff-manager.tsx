@@ -33,7 +33,14 @@ type Member = {
   rating?: { avgScore: number; count: number };
 };
 
-const ROLES: CafeRole[] = ["MANAGER", "CASHIER", "WAITER", "KITCHEN", "COURIER"];
+const ROLES: CafeRole[] = [
+  "MANAGER",
+  "CASHIER",
+  "WAITER",
+  "KITCHEN",
+  "COURIER",
+  "WAREHOUSE",
+];
 
 function getRoleSalary(role: CafeRole, name: string) {
   const base = {
@@ -43,6 +50,7 @@ function getRoleSalary(role: CafeRole, name: string) {
     CASHIER: 4000000,
     WAITER: 3000000,
     COURIER: 3500000,
+    WAREHOUSE: 3500000,
   }[role] || 3000000;
 
   // Deterministic variation based on name to look super realistic
@@ -543,7 +551,7 @@ export function StaffManager({
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          {["ALL", "WAITER", "KITCHEN", "CASHIER", "MANAGER", "COURIER"].map((roleFilter) => (
+          {["ALL", "WAITER", "KITCHEN", "CASHIER", "MANAGER", "COURIER", "WAREHOUSE"].map((roleFilter) => (
             <button
               key={roleFilter}
               type="button"

@@ -8269,6 +8269,9 @@ body {
   background: color-mix(in srgb, var(--pf-sidebar) 92%, transparent);
   border-color: var(--pf-border);
   backdrop-filter: blur(16px);
+  position: sticky;
+  top: 0;
+  align-self: stretch;
 }
 
 .dark .platform-sidebar {

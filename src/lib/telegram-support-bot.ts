@@ -1,13 +1,21 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { getConfiguredAppUrl, PRODUCTION_APP_URL } from "@/lib/app-url";
 import { getPlanConfig, type PlanId } from "@/lib/plans";
+import { formatDailyReportMessage } from "@/lib/daily-report";
+import { getReports } from "@/lib/reports";
 import {
-  createSupportMessage,
-  getOrCreateOpenConversation,
-} from "@/lib/support-chat";
+  formatBranchesMessage,
+  formatCustomReportMessage,
+  formatStaffChatPreview,
+  formatStaffDutyMessage,
+  formatTodaySalesMessage,
+  listOwnerCafes,
+  parseReportDateRange,
+  postOwnerStaffChatMessage,
+  type OwnerCafe,
+} from "@/lib/telegram-owner-ops";
 import {
-  copyTelegramMessage as copyTelegramMessageRaw,
-  getPlatformSupportTelegramChatId,
   getTelegramBotToken,
   getTelegramBotUsername,
   hasSeparateSupportBot,
@@ -26,16 +34,7 @@ function sendTelegramMessage(
   return sendTelegramMessageRaw(chatId, text, { ...options, bot: "support" });
 }
 
-function copyTelegramMessage(opts: {
-  toChatId: string;
-  fromChatId: string;
-  messageId: number;
-  caption?: string;
-}) {
-  return copyTelegramMessageRaw({ ...opts, bot: "support" });
-}
-
-export type BotSessionMode = "menu" | "support" | "prospect";
+export type BotSessionMode = "menu" | "report_range" | "staff_chat";
 
 type SessionRow = {
   chatId: string;
@@ -45,199 +44,34 @@ type SessionRow = {
 };
 
 export async function ensureTelegramSupportTables() {
+  // Postgres: quoted identifiers + TIMESTAMP (SQLite DATETIME emas)
   await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS TelegramBotSession (
-      chatId TEXT NOT NULL PRIMARY KEY,
-      userId TEXT,
-      cafeId TEXT,
-      mode TEXT NOT NULL DEFAULT 'menu',
-      updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS "TelegramBotSession" (
+      "chatId" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT,
+      "cafeId" TEXT,
+      "mode" TEXT NOT NULL DEFAULT 'menu',
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
   await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS TelegramOwnerLink (
-      id TEXT NOT NULL PRIMARY KEY,
-      userId TEXT NOT NULL,
-      expiresAt DATETIME NOT NULL,
-      usedAt DATETIME,
-      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    CREATE TABLE IF NOT EXISTS "TelegramOwnerLink" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "expiresAt" TIMESTAMP NOT NULL,
+      "usedAt" TIMESTAMP,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS TelegramAdminRelay (
-      adminMessageId TEXT NOT NULL PRIMARY KEY,
-      targetChatId TEXT NOT NULL,
-      cafeId TEXT,
-      label TEXT,
-      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS TelegramAdminPendingPhoto (
-      adminChatId TEXT NOT NULL PRIMARY KEY,
-      targetChatId TEXT NOT NULL,
-      cafeId TEXT,
-      label TEXT,
-      expiresAt DATETIME NOT NULL,
-      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-}
-
-async function saveAdminRelay(opts: {
-  adminMessageId?: number;
-  targetChatId: string;
-  cafeId?: string | null;
-  label?: string | null;
-}) {
-  if (opts.adminMessageId == null) return;
-  await ensureTelegramSupportTables();
-  const id = String(opts.adminMessageId);
-  await prisma.$executeRaw`
-    INSERT OR REPLACE INTO TelegramAdminRelay
-      (adminMessageId, targetChatId, cafeId, label, createdAt)
-    VALUES (
-      ${id},
-      ${opts.targetChatId},
-      ${opts.cafeId ?? null},
-      ${opts.label ?? null},
-      CURRENT_TIMESTAMP
-    )
-  `;
-}
-
-async function getAdminRelay(adminMessageId: number) {
-  await ensureTelegramSupportTables();
-  const rows = await prisma.$queryRaw<
-    Array<{
-      targetChatId: string;
-      cafeId: string | null;
-      label: string | null;
-    }>
-  >`
-    SELECT targetChatId, cafeId, label FROM TelegramAdminRelay
-    WHERE adminMessageId = ${String(adminMessageId)}
-    LIMIT 1
-  `;
-  return rows[0] ?? null;
-}
-
-const PENDING_PHOTO_TTL_MS = 30 * 60 * 1000;
-
-async function setAdminPendingPhoto(opts: {
-  adminChatId: string;
-  targetChatId: string;
-  cafeId?: string | null;
-  label?: string | null;
-}) {
-  await ensureTelegramSupportTables();
-  const expiresAt = new Date(Date.now() + PENDING_PHOTO_TTL_MS).toISOString();
-  await prisma.$executeRaw`
-    INSERT OR REPLACE INTO TelegramAdminPendingPhoto
-      (adminChatId, targetChatId, cafeId, label, expiresAt, createdAt)
-    VALUES (
-      ${opts.adminChatId},
-      ${opts.targetChatId},
-      ${opts.cafeId ?? null},
-      ${opts.label ?? null},
-      ${expiresAt},
-      CURRENT_TIMESTAMP
-    )
-  `;
-}
-
-async function getAdminPendingPhoto(adminChatId: string) {
-  await ensureTelegramSupportTables();
-  const rows = await prisma.$queryRaw<
-    Array<{
-      targetChatId: string;
-      cafeId: string | null;
-      label: string | null;
-      expiresAt: string | Date;
-    }>
-  >`
-    SELECT targetChatId, cafeId, label, expiresAt
-    FROM TelegramAdminPendingPhoto
-    WHERE adminChatId = ${adminChatId}
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row) return null;
-  if (new Date(row.expiresAt).getTime() < Date.now()) {
-    await clearAdminPendingPhoto(adminChatId);
-    return null;
-  }
-  return row;
-}
-
-async function clearAdminPendingPhoto(adminChatId: string) {
-  await ensureTelegramSupportTables();
-  await prisma.$executeRaw`
-    DELETE FROM TelegramAdminPendingPhoto WHERE adminChatId = ${adminChatId}
-  `;
-}
-
-/** Platforma tugmasi /start=aphoto_cafeId — keyingi rasm shu kafega */
-export async function activateAdminPhotoPendingFromStart(
-  adminChatId: string,
-  cafeId: string,
-) {
-  const platformChat = getPlatformSupportTelegramChatId();
-  if (!platformChat || adminChatId !== platformChat) {
-    await sendTelegramMessage(
-      adminChatId,
-      "Bu buyruq faqat platforma admin Telegrami uchun.",
-    );
-    return;
-  }
-
-  const rows = await prisma.$queryRaw<
-    Array<{
-      cafeName: string;
-      ownerName: string;
-      telegramChatId: string | null;
-    }>
-  >`
-    SELECT c.name as cafeName, u.name as ownerName, u.telegramChatId
-    FROM Cafe c
-    JOIN User u ON u.id = c.ownerId
-    WHERE c.id = ${cafeId}
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row?.telegramChatId) {
-    await sendTelegramMessage(
-      adminChatId,
-      "Kafe topilmadi yoki egasi Telegram ulamagan.",
-    );
-    return;
-  }
-
-  const label = `${row.cafeName} / ${row.ownerName}`;
-  await setAdminPendingPhoto({
-    adminChatId,
-    targetChatId: row.telegramChatId,
-    cafeId,
-    label,
-  });
-
-  await sendTelegramMessage(
-    adminChatId,
-    [
-      "📷 <b>Rasm yuborishga tayyor</b>",
-      `🏪 ${row.cafeName}`,
-      `👤 ${row.ownerName}`,
-      "",
-      "Endi shu yerga <b>rasm yuboring</b> — avtomatik egaga ketadi.",
-      "(Reply shart emas. 30 daqiqa amal qiladi.)",
-    ].join("\n"),
-  );
 }
 
 async function getSession(chatId: string): Promise<SessionRow | null> {
   await ensureTelegramSupportTables();
   const rows = await prisma.$queryRaw<SessionRow[]>`
-    SELECT chatId, userId, cafeId, mode FROM TelegramBotSession WHERE chatId = ${chatId} LIMIT 1
+    SELECT "chatId", "userId", "cafeId", "mode"
+    FROM "TelegramBotSession"
+    WHERE "chatId" = ${chatId}
+    LIMIT 1
   `;
   return rows[0] ?? null;
 }
@@ -254,84 +88,81 @@ async function setSession(input: {
   const cafeId = input.cafeId !== undefined ? input.cafeId : existing?.cafeId ?? null;
   if (existing) {
     await prisma.$executeRaw`
-      UPDATE TelegramBotSession
-      SET userId = ${userId}, cafeId = ${cafeId}, mode = ${input.mode}, updatedAt = CURRENT_TIMESTAMP
-      WHERE chatId = ${input.chatId}
+      UPDATE "TelegramBotSession"
+      SET "userId" = ${userId},
+          "cafeId" = ${cafeId},
+          "mode" = ${input.mode},
+          "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "chatId" = ${input.chatId}
     `;
   } else {
     await prisma.$executeRaw`
-      INSERT INTO TelegramBotSession (chatId, userId, cafeId, mode, updatedAt)
+      INSERT INTO "TelegramBotSession" ("chatId", "userId", "cafeId", "mode", "updatedAt")
       VALUES (${input.chatId}, ${userId}, ${cafeId}, ${input.mode}, CURRENT_TIMESTAMP)
     `;
   }
 }
 
-export async function findOwnerByChatId(chatId: string) {
-  // User.telegramChatId — raw SQL (Prisma client ba'zan eski bo'lishi mumkin)
-  const rows = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      name: string;
-      email: string;
-      telegramChatId: string | null;
-      cafeId: string | null;
-      cafeName: string | null;
-      cafeSlug: string | null;
-      plan: string | null;
-      status: string | null;
-      trialEndsAt: string | Date | null;
-      subscriptionEndsAt: string | Date | null;
-    }>
-  >`
-    SELECT
-      u.id, u.name, u.email, u.telegramChatId,
-      c.id as cafeId, c.name as cafeName, c.slug as cafeSlug,
-      c.plan, c.status, c.trialEndsAt, c.subscriptionEndsAt
-    FROM User u
-    LEFT JOIN Cafe c ON c.ownerId = u.id
-    WHERE u.telegramChatId = ${chatId}
-    ORDER BY c.createdAt ASC
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row) return null;
-  const user = {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    telegramChatId: row.telegramChatId,
+function siteUrl() {
+  return getConfiguredAppUrl() || PRODUCTION_APP_URL;
+}
+
+type OwnerContext = {
+  user: { id: string; name: string; email: string; telegramChatId: string | null };
+  cafes: OwnerCafe[];
+  cafe: OwnerCafe | null;
+};
+
+export async function findOwnerByChatId(chatId: string): Promise<OwnerContext | null> {
+  const user = await prisma.user.findFirst({
+    where: { telegramChatId: chatId },
+    select: { id: true, name: true, email: true, telegramChatId: true },
+  });
+  if (!user) return null;
+
+  const cafes = await listOwnerCafes(user.id);
+  const session = await getSession(chatId);
+  const cafe =
+    (session?.cafeId && cafes.find((c) => c.id === session.cafeId)) ||
+    cafes[0] ||
+    null;
+
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      telegramChatId: user.telegramChatId,
+    },
+    cafes,
+    cafe,
   };
-  const cafe = row.cafeId
-    ? {
-        id: row.cafeId,
-        name: row.cafeName ?? "",
-        slug: row.cafeSlug ?? "",
-        plan: row.plan ?? "STARTER",
-        status: row.status ?? "TRIAL",
-        trialEndsAt: row.trialEndsAt ? new Date(row.trialEndsAt) : null,
-        subscriptionEndsAt: row.subscriptionEndsAt
-          ? new Date(row.subscriptionEndsAt)
-          : null,
-      }
-    : null;
-  return { user, cafe };
 }
 
 export async function createOwnerTelegramLink(userId: string) {
   try {
     await ensureTelegramSupportTables();
+    if (!hasSeparateSupportBot()) {
+      return {
+        ok: false as const,
+        error:
+          "Egasi boti sozlanmagan: .env da TELEGRAM_SUPPORT_BOT_TOKEN (@nooklineSupportbot) kerak. Delivery botga ulanmaydi.",
+        status: 503,
+      };
+    }
     const bot = await getTelegramBotUsername("support");
     if (!bot || !getTelegramBotToken("support")) {
       return {
         ok: false as const,
-        error: "Support Telegram bot sozlanmagan (TELEGRAM_SUPPORT_BOT_TOKEN yoki TELEGRAM_BOT_TOKEN)",
+        error:
+          "Support Telegram bot sozlanmagan (TELEGRAM_SUPPORT_BOT_TOKEN / TELEGRAM_SUPPORT_BOT_USERNAME)",
         status: 503,
       };
     }
     const id = crypto.randomBytes(16).toString("hex");
-    const expiresAt = new Date(Date.now() + LINK_TTL_MS).toISOString();
+    const expiresAt = new Date(Date.now() + LINK_TTL_MS);
     await prisma.$executeRaw`
-      INSERT INTO TelegramOwnerLink (id, userId, expiresAt, createdAt)
+      INSERT INTO "TelegramOwnerLink" ("id", "userId", "expiresAt", "createdAt")
       VALUES (${id}, ${userId}, ${expiresAt}, CURRENT_TIMESTAMP)
     `;
     return {
@@ -357,19 +188,19 @@ export async function fulfillOwnerTelegramLink(linkId: string, chatId: string) {
       userId: string;
       expiresAt: string | Date;
       usedAt: string | Date | null;
-      name: string;
-      email: string;
     }>
   >`
-    SELECT l.id, l.userId, l.expiresAt, l.usedAt, u.name, u.email
-    FROM TelegramOwnerLink l
-    JOIN User u ON u.id = l.userId
-    WHERE l.id = ${linkId}
+    SELECT "id", "userId", "expiresAt", "usedAt"
+    FROM "TelegramOwnerLink"
+    WHERE "id" = ${linkId}
     LIMIT 1
   `;
   const link = rows[0];
   if (!link) {
-    await sendTelegramMessage(chatId, "Havola topilmadi. Dashboarddan qayta «Profilni ulash» ni bosing.");
+    await sendTelegramMessage(
+      chatId,
+      "Havola topilmadi. Dashboarddan qayta «Profilni ulash» ni bosing.",
+    );
     return { ok: false as const };
   }
   if (link.usedAt) {
@@ -381,23 +212,38 @@ export async function fulfillOwnerTelegramLink(linkId: string, chatId: string) {
     return { ok: false as const };
   }
 
-  // Shu chat boshqa akkauntda bo'lsa — uzamiz
+  const user = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { id: true, name: true, email: true },
+  });
+  if (!user) {
+    await sendTelegramMessage(chatId, "Foydalanuvchi topilmadi.");
+    return { ok: false as const };
+  }
+
+  await prisma.user.updateMany({
+    where: { telegramChatId: chatId, NOT: { id: link.userId } },
+    data: { telegramChatId: null },
+  });
+  await prisma.user.update({
+    where: { id: link.userId },
+    data: { telegramChatId: chatId },
+  });
+  const usedAt = new Date();
   await prisma.$executeRaw`
-    UPDATE User SET telegramChatId = NULL WHERE telegramChatId = ${chatId} AND id != ${link.userId}
-  `;
-  await prisma.$executeRaw`
-    UPDATE User SET telegramChatId = ${chatId} WHERE id = ${link.userId}
-  `;
-  const usedAt = new Date().toISOString();
-  await prisma.$executeRaw`
-    UPDATE TelegramOwnerLink SET usedAt = ${usedAt} WHERE id = ${link.id}
+    UPDATE "TelegramOwnerLink" SET "usedAt" = ${usedAt} WHERE "id" = ${link.id}
   `;
 
-  const cafe = await prisma.cafe.findFirst({
-    where: { ownerId: link.userId },
-    select: { id: true, name: true },
-    orderBy: { createdAt: "asc" },
-  });
+  const cafes = await listOwnerCafes(link.userId);
+  const cafe = cafes[0] ?? null;
+
+  // Kunlik hisobotlar Cafe.telegramChatId dan o‘qiydi
+  if (cafes.length > 0) {
+    await prisma.cafe.updateMany({
+      where: { ownerId: link.userId },
+      data: { telegramChatId: chatId },
+    });
+  }
 
   await setSession({
     chatId,
@@ -410,37 +256,45 @@ export async function fulfillOwnerTelegramLink(linkId: string, chatId: string) {
     chatId,
     [
       "✅ <b>Profil ulandi</b>",
-      `👤 ${link.name}`,
-      `✉️ ${link.email}`,
+      `👤 ${user.name}`,
+      `✉️ ${user.email}`,
       cafe ? `🏪 ${cafe.name}` : "🏪 Kafe hali bog'lanmagan",
       "",
-      "Matn — faqat Platforma Support (sayt).",
-      "Skrinshot — shu botga rasm yuboring.",
+      "Bu botda: bugungi savdo, xodimlar, hisobot, filiallar va ichki xodim chati.",
+      "Platforma Support (sayt) alohida — bu yerga aralashmaydi.",
     ].join("\n"),
-    { inlineKeyboard: ownerMenuKeyboard() },
+    { inlineKeyboard: ownerMenuKeyboard(cafes.length > 1) },
   );
   return { ok: true as const };
 }
 
-export function ownerMenuKeyboard(): TelegramInlineButton[][] {
-  return [
-    [{ text: "📋 Joriy tarif", callback_data: "owner_plan" }],
-    [{ text: "📷 Skrinshot yuborish", callback_data: "owner_photo_help" }],
-    [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+export function ownerMenuKeyboard(hasBranches = false): TelegramInlineButton[][] {
+  const rows: TelegramInlineButton[][] = [
+    [{ text: "📊 Bugungi savdo", callback_data: "owner_sales_today" }],
+    [{ text: "👥 Bugun ishdagilar", callback_data: "owner_staff_duty" }],
+    [{ text: "📈 Savdo hisoboti", callback_data: "owner_report_range" }],
   ];
+  if (hasBranches) {
+    rows.push([{ text: "🏪 Filiallar", callback_data: "owner_branches" }]);
+  }
+  rows.push(
+    [{ text: "💬 Xodim bilan bog‘lanish", callback_data: "owner_staff_chat" }],
+    [{ text: "📋 Joriy tarif", callback_data: "owner_plan" }],
+    [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+  );
+  return rows;
 }
 
 export function guestMenuKeyboard(): TelegramInlineButton[][] {
-  const customer = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, "").trim();
-  const orderBtn: TelegramInlineButton =
-    hasSeparateSupportBot() && customer
-      ? { text: "🛒 Buyurtma (mijoz bot)", url: `https://t.me/${customer}` }
-      : { text: "🛒 Buyurtma (mijoz)", callback_data: "cust_home" };
+  const url = siteUrl();
   return [
-    [orderBtn],
-    [{ text: "📷 Skrinshot yuborish", callback_data: "guest_photo_help" }],
-    [{ text: "ℹ️ Support haqida", callback_data: "guest_about" }],
+    [{ text: "🌐 Asosiy sayt", url }],
+    [{ text: "ℹ️ Tizim haqida", callback_data: "guest_about" }],
   ];
+}
+
+function ownerKb(ctx: OwnerContext) {
+  return ownerMenuKeyboard(ctx.cafes.length > 1);
 }
 
 export async function formatOwnerPlanMessage(cafeId: string) {
@@ -489,6 +343,23 @@ export async function formatOwnerPlanMessage(cafeId: string) {
   return lines.join("\n");
 }
 
+function guestWelcomeText() {
+  const url = siteUrl();
+  return [
+    `<b>NOOKLINE</b> — kafe avtomatlashtirish platformasi`,
+    "",
+    "Kafe va restoran ishini bitta tizimda boshqarish uchun:",
+    "zal, oshxona, kuryer, online buyurtma, hisobot va xodimlar.",
+    "",
+    "Vazifasi — qog‘oz/chaqoq jarayonlarni kamaytirib, buyurtma va savdoni avtomatlashtirish.",
+    "",
+    `🌐 Batafsil va ro‘yxatdan o‘tish: ${url}`,
+    "",
+    "Kafe egasisizmi? Saytdagi Dashboarddan «Telegram profilni ulash».",
+    "Parol unutilgan bo‘lsa — saytda email orqali kod oling.",
+  ].join("\n");
+}
+
 export async function sendWelcome(chatId: string) {
   const linked = await findOwnerByChatId(chatId);
   if (linked?.cafe) {
@@ -502,46 +373,73 @@ export async function sendWelcome(chatId: string) {
     const extraRows: TelegramInlineButton[][] =
       hasSeparateSupportBot() && customer
         ? [[{ text: "🛒 Mijoz buyurtmasi", url: `https://t.me/${customer}` }]]
-        : hasSeparateSupportBot()
-          ? []
-          : [[{ text: "🛒 Mijoz buyurtmasi", callback_data: "cust_home" }]];
+        : [];
     await sendTelegramMessage(
       chatId,
       [
-        `🛠 <b>NOOKLINE Support</b>`,
+        `🛠 <b>NOOKLINE — kafe egasi</b>`,
         `Xush kelibsiz, ${linked.user.name}!`,
         `🏪 ${linked.cafe.name}`,
+        linked.cafes.length > 1
+          ? `Filiallar: ${linked.cafes.length} ta`
+          : "",
         "",
-        "Bu menyu — egasi / support uchun.",
-        "Muammo skrinshotini shu yerga rasm qilib yuboring.",
-        hasSeparateSupportBot()
-          ? "Buyurtma — alohida mijoz (delivery) botida."
-          : "Mijoz buyurtmasi: /start",
-      ].join("\n"),
+        "Bugungi savdo, xodimlar, hisobot va ichki chat — pastdagi menyuda.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
       {
-        inlineKeyboard: [...ownerMenuKeyboard(), ...extraRows],
+        inlineKeyboard: [...ownerKb(linked), ...extraRows],
       },
     );
     return;
   }
 
+  if (linked?.user && !linked.cafe) {
+    await setSession({
+      chatId,
+      userId: linked.user.id,
+      cafeId: null,
+      mode: "menu",
+    });
+    await sendTelegramMessage(
+      chatId,
+      [
+        `🛠 <b>NOOKLINE</b>`,
+        `Profilingiz ulangan (${linked.user.name}), lekin kafe topilmadi.`,
+        "Dashboardda kafe yaratilganini tekshiring.",
+      ].join("\n"),
+      { inlineKeyboard: guestMenuKeyboard() },
+    );
+    return;
+  }
+
   await setSession({ chatId, mode: "menu", userId: null, cafeId: null });
-  await sendTelegramMessage(
-    chatId,
-    [
-      `🛠 <b>NOOKLINE Support</b>`,
-      "",
-      "Kafe egasi: Dashboarddan «Telegram profilni ulash».",
-      hasSeparateSupportBot()
-        ? "Buyurtma berish — mijoz (delivery) botida."
-        : "Mijoz buyurtmasi uchun /start bosing.",
-    ].join("\n"),
-    { inlineKeyboard: guestMenuKeyboard() },
-  );
+  await sendTelegramMessage(chatId, guestWelcomeText(), {
+    inlineKeyboard: guestMenuKeyboard(),
+  });
+}
+
+function branchKeyboard(cafes: OwnerCafe[], activeId: string): TelegramInlineButton[][] {
+  const rows: TelegramInlineButton[][] = cafes.map((c) => [
+    {
+      text: `${c.id === activeId ? "✅ " : ""}${c.name}${c.isMainBranch ? " ★" : ""}`,
+      callback_data: `owner_branch:${c.id}`,
+    },
+  ]);
+  rows.push([{ text: "🏠 Menyuga", callback_data: "owner_menu" }]);
+  return rows;
 }
 
 export async function handleOwnerCallback(chatId: string, data: string) {
   try {
+    if (data === "guest_about") {
+      await sendTelegramMessage(chatId, guestWelcomeText(), {
+        inlineKeyboard: guestMenuKeyboard(),
+      });
+      return;
+    }
+
     const linked = await findOwnerByChatId(chatId);
     if (!linked?.cafe && data.startsWith("owner_")) {
       await sendTelegramMessage(
@@ -554,66 +452,157 @@ export async function handleOwnerCallback(chatId: string, data: string) {
       return;
     }
 
+    if (!linked?.cafe) return;
+    const cafe = linked.cafe;
+
     if (data === "owner_menu") {
       await setSession({
         chatId,
-        userId: linked!.user.id,
-        cafeId: linked!.cafe!.id,
+        userId: linked.user.id,
+        cafeId: cafe.id,
         mode: "menu",
       });
       await sendTelegramMessage(chatId, "Asosiy menyu:", {
-        inlineKeyboard: ownerMenuKeyboard(),
+        inlineKeyboard: ownerKb(linked),
       });
       return;
     }
 
     if (data === "owner_plan") {
-      const text = await formatOwnerPlanMessage(linked!.cafe!.id);
+      const text = await formatOwnerPlanMessage(cafe.id);
       await sendTelegramMessage(chatId, text, {
-        inlineKeyboard: ownerMenuKeyboard(),
+        inlineKeyboard: ownerKb(linked),
       });
       return;
     }
 
-    if (data === "owner_photo_help") {
+    if (data === "owner_sales_today") {
+      const text = await formatTodaySalesMessage(cafe);
+      await sendTelegramMessage(chatId, text, {
+        inlineKeyboard: ownerKb(linked),
+      });
+      return;
+    }
+
+    if (data === "owner_staff_duty") {
+      const text = await formatStaffDutyMessage(cafe);
+      await sendTelegramMessage(chatId, text, {
+        inlineKeyboard: ownerKb(linked),
+      });
+      return;
+    }
+
+    if (data === "owner_report_range") {
       await setSession({
         chatId,
-        userId: linked!.user.id,
-        cafeId: linked!.cafe!.id,
+        userId: linked.user.id,
+        cafeId: cafe.id,
+        mode: "report_range",
+      });
+      await sendTelegramMessage(
+        chatId,
+        [
+          "📈 <b>Savdo hisoboti</b>",
+          `🏪 ${cafe.name}`,
+          "",
+          "Muddatni yozing (maks. 90 kun):",
+          "<code>YYYY-MM-DD YYYY-MM-DD</code>",
+          "Masalan: <code>2026-07-01 2026-07-23</code>",
+          "",
+          "Bekor: /menu",
+        ].join("\n"),
+        {
+          inlineKeyboard: [
+            [{ text: "📅 Bugun", callback_data: "owner_sales_today" }],
+            [{ text: "📅 7 kun", callback_data: "owner_report_week" }],
+            [{ text: "📅 30 kun", callback_data: "owner_report_month" }],
+            [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+          ],
+        },
+      );
+      return;
+    }
+
+    if (data === "owner_report_week" || data === "owner_report_month") {
+      const period = data === "owner_report_week" ? "week" : "month";
+      try {
+        const report = await getReports(cafe.id, period);
+        await setSession({
+          chatId,
+          userId: linked.user.id,
+          cafeId: cafe.id,
+          mode: "menu",
+        });
+        await sendTelegramMessage(
+          chatId,
+          formatDailyReportMessage(cafe.name, report),
+          { inlineKeyboard: ownerKb(linked) },
+        );
+      } catch (e) {
+        console.error("[owner_report_period]", e);
+        await sendTelegramMessage(chatId, "⚠️ Hisobot olinmadi.", {
+          inlineKeyboard: ownerKb(linked),
+        });
+      }
+      return;
+    }
+
+    if (data === "owner_branches") {
+      await sendTelegramMessage(
+        chatId,
+        formatBranchesMessage(linked.cafes, cafe.id),
+        { inlineKeyboard: branchKeyboard(linked.cafes, cafe.id) },
+      );
+      return;
+    }
+
+    if (data.startsWith("owner_branch:")) {
+      const cafeId = data.slice("owner_branch:".length);
+      const next = linked.cafes.find((c) => c.id === cafeId);
+      if (!next) {
+        await sendTelegramMessage(chatId, "Filial topilmadi.", {
+          inlineKeyboard: ownerKb(linked),
+        });
+        return;
+      }
+      await setSession({
+        chatId,
+        userId: linked.user.id,
+        cafeId: next.id,
         mode: "menu",
       });
       await sendTelegramMessage(
         chatId,
-        "📷 <b>Skrinshot</b>\nShu yerga rasm yuboring — admin Telegramiga yetadi.\n\nMatn yozish: Dashboard / Platforma Support.",
-        { inlineKeyboard: ownerMenuKeyboard() },
+        `✅ Faol filial: <b>${next.name}</b>\nKeyingi savdo/hisobot shu nuqta uchun.`,
+        { inlineKeyboard: ownerMenuKeyboard(linked.cafes.length > 1) },
       );
       return;
     }
 
-    if (data === "guest_about") {
+    if (data === "owner_staff_chat") {
+      await setSession({
+        chatId,
+        userId: linked.user.id,
+        cafeId: cafe.id,
+        mode: "staff_chat",
+      });
+      const preview = await formatStaffChatPreview(cafe.id);
       await sendTelegramMessage(
         chatId,
         [
-          "<b>NOOKLINE Support</b>",
+          `💬 <b>Xodimlar chati</b> — ${cafe.name}`,
+          "Bu ichki chat (platforma Support emas).",
           "",
-          "Bu bo‘lim — kafe egasi / support uchun.",
-          "Matnli savollar — sayt orqali.",
-          "Skrinshot — shu botga rasm.",
-          "",
-          "Buyurtma berish uchun «Buyurtma (mijoz)» ni bosing.",
+          preview,
         ].join("\n"),
-        { inlineKeyboard: guestMenuKeyboard() },
+        {
+          inlineKeyboard: [
+            [{ text: "🔄 Yangilash", callback_data: "owner_staff_chat" }],
+            [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+          ],
+        },
       );
       return;
-    }
-
-    if (data === "guest_photo_help") {
-      await setSession({ chatId, mode: "menu", userId: null, cafeId: null });
-      await sendTelegramMessage(
-        chatId,
-        "📷 Skrinshotni shu yerga yuboring.\nMatnli yozishmalar botda yo'q — saytdan murojaat qiling.",
-        { inlineKeyboard: guestMenuKeyboard() },
-      );
     }
   } catch (e) {
     console.error("[handleOwnerCallback]", data, e);
@@ -630,428 +619,122 @@ export async function handleBotTextMessage(chatId: string, text: string) {
     return;
   }
 
-  // Botda matnli chat yo'q — faqat rasm / menyu
+  const session = await getSession(chatId);
   const linked = await findOwnerByChatId(chatId);
+
+  if (linked?.cafe && session?.mode === "report_range") {
+    const parsed = parseReportDateRange(text);
+    if ("error" in parsed) {
+      await sendTelegramMessage(chatId, parsed.error, {
+        inlineKeyboard: [
+          [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+        ],
+      });
+      return;
+    }
+    const reportText = await formatCustomReportMessage(
+      linked.cafe,
+      parsed.from,
+      parsed.to,
+    );
+    await setSession({
+      chatId,
+      userId: linked.user.id,
+      cafeId: linked.cafe.id,
+      mode: "menu",
+    });
+    await sendTelegramMessage(chatId, reportText, {
+      inlineKeyboard: ownerKb(linked),
+    });
+    return;
+  }
+
+  if (linked?.cafe && session?.mode === "staff_chat") {
+    const result = await postOwnerStaffChatMessage({
+      cafeId: linked.cafe.id,
+      userId: linked.user.id,
+      userName: linked.user.name,
+      text,
+    });
+    if (!result.ok) {
+      await sendTelegramMessage(chatId, `⚠️ ${result.error}`);
+      return;
+    }
+    await sendTelegramMessage(
+      chatId,
+      "✅ Xabar ichki chatga yuborildi (platforma Support emas).",
+      {
+        inlineKeyboard: [
+          [{ text: "🔄 Yangilash", callback_data: "owner_staff_chat" }],
+          [{ text: "🏠 Menyuga", callback_data: "owner_menu" }],
+        ],
+      },
+    );
+    return;
+  }
+
   if (linked?.cafe) {
     await sendTelegramMessage(
       chatId,
-      "💬 Matn almashinuvi faqat <b>Platforma Support</b> (sayt) orqali.\n\nSkrinshot bo'lsa — shu botga <b>rasm</b> yuboring.",
-      { inlineKeyboard: ownerMenuKeyboard() },
+      "Menyudan tanlang yoki /menu yuboring.\n💬 Xodimlar bilan yozishish: «Xodim bilan bog‘lanish».",
+      { inlineKeyboard: ownerKb(linked) },
     );
     return;
   }
 
   await sendTelegramMessage(
     chatId,
-    "Bu botda chat yo'q.\nSkrinshot — rasm yuboring.\nMatnli savol — sayt orqali.",
+    "Bu bot — NOOKLINE kafe tizimi uchun.\nAsosiy sayt va ma’lumot — pastdagi tugmalar.",
     { inlineKeyboard: guestMenuKeyboard() },
   );
 }
 
-/**
- * Rasm — platformaga emas, Telegram copyMessage (diskka yozilmaydi).
- * Admin: kelgan xabarga reply qilib rasm → o'sha odamga.
- */
+/** Rasm orqali platformaga yuborish o‘chirilgan */
 export async function handleBotMediaMessage(opts: {
   chatId: string;
   messageId: number;
   caption?: string;
   replyToMessageId?: number;
 }) {
-  const caption = opts.caption?.trim() || "";
-  const platformChat = getPlatformSupportTelegramChatId();
-  const isAdminChat = !!platformChat && opts.chatId === platformChat;
-
-  // Admin reply → aniq odamga
-  if (isAdminChat && opts.replyToMessageId) {
-    await deliverAdminRelayPhoto({
-      adminChatId: opts.chatId,
-      messageId: opts.messageId,
-      replyToMessageId: opts.replyToMessageId,
-      caption,
-    });
-    return;
-  }
-
-  // Platforma tugmasidan ochilgan «tayyor» rejim — reply shart emas
-  if (isAdminChat) {
-    const pending = await getAdminPendingPhoto(opts.chatId);
-    if (pending) {
-      await deliverAdminPhotoToTarget({
-        adminChatId: opts.chatId,
-        messageId: opts.messageId,
-        targetChatId: pending.targetChatId,
-        cafeId: pending.cafeId,
-        label: pending.label,
-        caption,
-      });
-      await clearAdminPendingPhoto(opts.chatId);
-      return;
-    }
-  }
-
-  // Ulangan egasi — istalgan vaqtda skrinshot (matn chatsiz)
+  void opts.messageId;
+  void opts.caption;
+  void opts.replyToMessageId;
   const linked = await findOwnerByChatId(opts.chatId);
-  if (linked?.cafe && linked.user) {
-    await deliverOwnerSupportMedia({
-      chatId: opts.chatId,
-      messageId: opts.messageId,
-      userId: linked.user.id,
-      cafeId: linked.cafe.id,
-      caption,
-    });
-    return;
-  }
-
-  // Ulanmagan — faqat rasm (yangi mijoz skrinshoti)
-  if (!isAdminChat) {
-    const ok = await forwardProspectMediaToTelegram(
-      opts.chatId,
-      opts.messageId,
-      caption,
-    );
-    await sendTelegramMessage(
-      opts.chatId,
-      ok
-        ? "✅ Skrinshot yuborildi."
-        : "Rasm qabul qilinmadi: PLATFORM_SUPPORT_TELEGRAM_CHAT_ID sozlanmagan.",
-      { inlineKeyboard: guestMenuKeyboard() },
-    );
-    return;
-  }
-
   await sendTelegramMessage(
     opts.chatId,
-    "Rasm uchun Platforma Support dagi rasm tugmasini bosing yoki kelgan xabarga Reply qiling.",
+    linked?.cafe
+      ? "📷 Rasm yuborish o‘chirilgan.\nKafe ishlari: menyu (savdo, xodim, hisobot, ichki chat)."
+      : "📷 Bu botda rasm qabul qilinmaydi.\nTizim haqida — «Tizim haqida» yoki asosiy sayt.",
+    {
+      inlineKeyboard: linked?.cafe
+        ? ownerKb(linked)
+        : guestMenuKeyboard(),
+    },
   );
 }
 
-async function deliverAdminRelayPhoto(opts: {
-  adminChatId: string;
-  messageId: number;
-  replyToMessageId: number;
-  caption: string;
-}) {
-  const relay = await getAdminRelay(opts.replyToMessageId);
-  if (!relay) {
-    await sendTelegramMessage(
-      opts.adminChatId,
-      "Bu xabarga bog'langan suhbat topilmadi.\nPlatformadagi rasm tugmasini bosing.",
-    );
-    return;
-  }
-
-  await deliverAdminPhotoToTarget({
-    adminChatId: opts.adminChatId,
-    messageId: opts.messageId,
-    targetChatId: relay.targetChatId,
-    cafeId: relay.cafeId,
-    label: relay.label,
-    caption: opts.caption,
-  });
-}
-
-async function deliverAdminPhotoToTarget(opts: {
-  adminChatId: string;
-  messageId: number;
-  targetChatId: string;
-  cafeId: string | null;
-  label: string | null;
-  caption: string;
-}) {
-  if (opts.targetChatId === opts.adminChatId) {
-    await sendTelegramMessage(
-      opts.adminChatId,
-      "✅ (Test) Admin va egasi bir xil Telegram — rasm shu chatda. Prod da alohida admin chat ID ishlating.",
-    );
-    if (opts.cafeId) {
-      const conversationId = await getOrCreateOpenConversation(opts.cafeId);
-      await createSupportMessage({
-        conversationId,
-        cafeId: opts.cafeId,
-        senderType: "PLATFORM",
-        senderUserId: "telegram-admin",
-        senderName: "Platform Admin (Telegram)",
-        text: "📷 Rasm Telegram orqali yuborildi (test — bir xil chat)",
-      });
-    }
-    return;
-  }
-
-  const copied = await copyTelegramMessage({
-    toChatId: opts.targetChatId,
-    fromChatId: opts.adminChatId,
-    messageId: opts.messageId,
-    caption: opts.caption || undefined,
-  });
-
-  if (!copied.ok) {
-    await sendTelegramMessage(opts.adminChatId, "⚠️ Rasm yuborilmadi.");
-    return;
-  }
-
-  if (opts.cafeId) {
-    const conversationId = await getOrCreateOpenConversation(opts.cafeId);
-    await createSupportMessage({
-      conversationId,
-      cafeId: opts.cafeId,
-      senderType: "PLATFORM",
-      senderUserId: "telegram-admin",
-      senderName: "Platform Admin (Telegram)",
-      text: opts.caption
-        ? `📷 Rasm Telegram orqali yuborildi\n${opts.caption.slice(0, 1800)}`
-        : "📷 Rasm Telegram orqali yuborildi",
-    });
-    const owner = await findOwnerByChatId(opts.targetChatId);
-    if (owner?.user) {
-      await setSession({
-        chatId: opts.targetChatId,
-        userId: owner.user.id,
-        cafeId: opts.cafeId,
-        mode: "menu",
-      });
-    }
-  }
-
-  await sendTelegramMessage(
-    opts.adminChatId,
-    `✅ Rasm yuborildi${opts.label ? `: ${opts.label}` : ""}`,
-  );
-}
-
-/**
- * Platforma rasm tugmasi: pending rejim + Telegram deep link (reply UI ochib bo'lmaydi,
- * lekin keyingi rasm avtomatik shu kafega ketadi).
- */
-export async function openAdminPhotoRelaySlot(cafeId: string) {
-  const target = getPlatformSupportTelegramChatId();
-  if (!target) {
-    return {
-      ok: false as const,
-      error: "PLATFORM_SUPPORT_TELEGRAM_CHAT_ID sozlanmagan",
-    };
-  }
-
-  const rows = await prisma.$queryRaw<
-    Array<{
-      cafeName: string;
-      ownerName: string;
-      telegramChatId: string | null;
-    }>
-  >`
-    SELECT c.name as cafeName, u.name as ownerName, u.telegramChatId
-    FROM Cafe c
-    JOIN User u ON u.id = c.ownerId
-    WHERE c.id = ${cafeId}
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row) return { ok: false as const, error: "Kafe topilmadi" };
-  if (!row.telegramChatId) {
-    return {
-      ok: false as const,
-      error: "Egasi Telegram profilini ulamagan — rasm yuborib bo'lmaydi",
-    };
-  }
-
-  const label = `${row.cafeName} / ${row.ownerName}`;
-  await setAdminPendingPhoto({
-    adminChatId: target,
-    targetChatId: row.telegramChatId,
-    cafeId,
-    label,
-  });
-
-  const sent = await sendTelegramMessage(
-    target,
-    [
-      "📷 <b>Rasm yuborishga tayyor</b>",
-      `🏪 ${row.cafeName}`,
-      `👤 ${row.ownerName}`,
-      "",
-      "Endi shu yerga <b>rasm yuboring</b> — avtomatik egaga ketadi.",
-      "(Reply shart emas)",
-    ].join("\n"),
-  );
-  if (sent.messageId != null) {
-    await saveAdminRelay({
-      adminMessageId: sent.messageId,
-      targetChatId: row.telegramChatId,
-      cafeId,
-      label,
-    });
-  }
-
-  const conversationId = await getOrCreateOpenConversation(cafeId);
-  await createSupportMessage({
-    conversationId,
-    cafeId,
-    senderType: "PLATFORM",
-    senderUserId: "telegram-admin",
-    senderName: "Platform Admin",
-    text: "📷 Telegramda rasm yuborishga tayyor — botga rasm yuboring",
-  });
-
-  const bot = await getTelegramBotUsername("support");
-  const telegramUrl = bot
-    ? `https://t.me/${bot}?start=aphoto_${cafeId}`
-    : null;
-
-  return { ok: true as const, telegramUrl };
-}
-
-async function deliverOwnerSupportMedia(opts: {
-  chatId: string;
-  messageId: number;
-  userId: string;
-  cafeId: string;
-  caption: string;
-}) {
-  const user = await prisma.user.findUnique({
-    where: { id: opts.userId },
-    select: { id: true, name: true },
-  });
-  if (!user) {
-    await sendTelegramMessage(opts.chatId, "Sessiya eskirgan. /start bosing.");
-    return;
-  }
-
-  const cafe = await prisma.cafe.findUnique({
-    where: { id: opts.cafeId },
-    select: { name: true },
-  });
-
-  const target = getPlatformSupportTelegramChatId();
-  if (!target) {
-    await sendTelegramMessage(
-      opts.chatId,
-      "⚠️ Rasm yetkazilmadi: PLATFORM_SUPPORT_TELEGRAM_CHAT_ID sozlanmagan.",
-    );
-    return;
-  }
-
-  const header = [
-    "📷 <b>Kafe rasmi</b>",
-    `🏪 ${cafe?.name ?? "Kafe"}`,
-    `👤 ${user.name}`,
-    opts.caption ? "" : null,
-    opts.caption ? opts.caption.slice(0, 500) : null,
-  ]
-    .filter((x): x is string => x != null)
-    .join("\n");
-
-  const label = `${cafe?.name ?? "Kafe"} / ${user.name}`;
-  let delivered = false;
-
-  // Bir xil chat (admin = egasi test) — faqat izoh; aks holda rasm nusxasi
-  if (target === opts.chatId) {
-    const sent = await sendTelegramMessage(
-      target,
-      `${header}\n\n(Yuqoridagi rasm)\n\n↩️ Reply qilib javob rasmi yuborishingiz mumkin.`,
-    );
-    delivered = sent.ok;
-    await saveAdminRelay({
-      adminMessageId: sent.messageId,
-      targetChatId: opts.chatId,
-      cafeId: opts.cafeId,
-      label,
-    });
-  } else {
-    const head = await sendTelegramMessage(target, header);
-    await saveAdminRelay({
-      adminMessageId: head.messageId,
-      targetChatId: opts.chatId,
-      cafeId: opts.cafeId,
-      label,
-    });
-    const copied = await copyTelegramMessage({
-      toChatId: target,
-      fromChatId: opts.chatId,
-      messageId: opts.messageId,
-    });
-    delivered = copied.ok;
-    await saveAdminRelay({
-      adminMessageId: copied.messageId,
-      targetChatId: opts.chatId,
-      cafeId: opts.cafeId,
-      label,
-    });
-  }
-
-  // Platformada rasm ochilmaydi — faqat ogohlantirish
-  const conversationId = await getOrCreateOpenConversation(opts.cafeId);
-  const note = delivered
-    ? "📷 Rasm Telegram orqali yuborildi (admin Telegramida)"
-    : "📷 Rasm yuborildi, lekin admin Telegramiga yetkazilmadi";
-  await createSupportMessage({
-    conversationId,
-    cafeId: opts.cafeId,
-    senderType: "CAFE",
-    senderUserId: user.id,
-    senderName: `${user.name} (Telegram)`,
-    text: opts.caption ? `${note}\n${opts.caption.slice(0, 1800)}` : note,
-  });
-
-  await sendTelegramMessage(opts.chatId, "✅");
-}
-
-async function forwardProspectMediaToTelegram(
-  fromChatId: string,
-  messageId: number,
-  caption: string,
+/** @deprecated Rasm slot o‘chirilgan */
+export async function activateAdminPhotoPendingFromStart(
+  adminChatId: string,
+  _cafeId: string,
 ) {
-  const target = getPlatformSupportTelegramChatId();
-  if (!target) return false;
+  await sendTelegramMessage(
+    adminChatId,
+    "📷 Telegram orqali rasm yuborish o‘chirilgan. Matn — saytdagi Platforma Support orqali.",
+  );
+}
 
-  const header = [
-    "🆕 <b>Yangi mijoz — rasm</b>",
-    `Chat: <code>${fromChatId}</code>`,
-    caption ? "" : null,
-    caption ? caption.slice(0, 500) : null,
-    "",
-    "↩️ Reply qilib javob rasmi yuborishingiz mumkin.",
-  ]
-    .filter((x): x is string => x != null)
-    .join("\n");
-
-  if (target === fromChatId) {
-    const sent = await sendTelegramMessage(
-      target,
-      `${header}\n\n(Yuqoridagi rasm)`,
-    );
-    await saveAdminRelay({
-      adminMessageId: sent.messageId,
-      targetChatId: fromChatId,
-      cafeId: null,
-      label: "Yangi mijoz",
-    });
-    return sent.ok;
-  }
-
-  const head = await sendTelegramMessage(target, header);
-  await saveAdminRelay({
-    adminMessageId: head.messageId,
-    targetChatId: fromChatId,
-    cafeId: null,
-    label: "Yangi mijoz",
-  });
-  const copied = await copyTelegramMessage({
-    toChatId: target,
-    fromChatId,
-    messageId,
-  });
-  await saveAdminRelay({
-    adminMessageId: copied.messageId,
-    targetChatId: fromChatId,
-    cafeId: null,
-    label: "Yangi mijoz",
-  });
-  return copied.ok;
+/** @deprecated Rasm slot o‘chirilgan */
+export async function openAdminPhotoRelaySlot(_cafeId: string) {
+  return {
+    ok: false as const,
+    error: "Telegram orqali rasm yuborish o‘chirilgan. Matnli support — sayt orqali.",
+  };
 }
 
 /**
- * Platforma matn javobi — botda chat ochilmaydi.
- * Faqat qisqa eslatma (to'liq matn saytda).
+ * Platforma matn javobi — botda platforma chat ochilmaydi.
+ * Faqat qisqa eslatma (to‘liq matn saytda).
  */
 export async function notifyOwnerTelegramSupportReply(opts: {
   cafeId: string;
@@ -1060,16 +743,11 @@ export async function notifyOwnerTelegramSupportReply(opts: {
 }) {
   void opts.text;
   void opts.senderName;
-  const rows = await prisma.$queryRaw<
-    Array<{ telegramChatId: string | null }>
-  >`
-    SELECT u.telegramChatId
-    FROM Cafe c
-    JOIN User u ON u.id = c.ownerId
-    WHERE c.id = ${opts.cafeId}
-    LIMIT 1
-  `;
-  const chatId = rows[0]?.telegramChatId;
+  const cafe = await prisma.cafe.findUnique({
+    where: { id: opts.cafeId },
+    select: { owner: { select: { telegramChatId: true } } },
+  });
+  const chatId = cafe?.owner?.telegramChatId;
   if (!chatId) return;
 
   await sendTelegramMessage(
@@ -1082,35 +760,34 @@ export async function sendSubscriptionExpiryWarnings() {
   const now = new Date();
   const from = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
   const to = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-  const fromIso = from.toISOString();
-  const toIso = to.toISOString();
 
-  const cafes = await prisma.$queryRaw<
-    Array<{
-      name: string;
-      plan: string;
-      status: string;
-      trialEndsAt: string | Date | null;
-      subscriptionEndsAt: string | Date | null;
-      telegramChatId: string | null;
-      ownerName: string | null;
-    }>
-  >`
-    SELECT c.name, c.plan, c.status, c.trialEndsAt, c.subscriptionEndsAt,
-           u.telegramChatId, u.name as ownerName
-    FROM Cafe c
-    JOIN User u ON u.id = c.ownerId
-    WHERE u.telegramChatId IS NOT NULL
-      AND (
-        (c.status = 'TRIAL' AND c.trialEndsAt >= ${fromIso} AND c.trialEndsAt <= ${toIso})
-        OR
-        (c.status = 'ACTIVE' AND c.subscriptionEndsAt >= ${fromIso} AND c.subscriptionEndsAt <= ${toIso})
-      )
-  `;
+  const cafes = await prisma.cafe.findMany({
+    where: {
+      owner: { telegramChatId: { not: null } },
+      OR: [
+        {
+          status: "TRIAL",
+          trialEndsAt: { gte: from, lte: to },
+        },
+        {
+          status: "ACTIVE",
+          subscriptionEndsAt: { gte: from, lte: to },
+        },
+      ],
+    },
+    select: {
+      name: true,
+      plan: true,
+      status: true,
+      trialEndsAt: true,
+      subscriptionEndsAt: true,
+      owner: { select: { telegramChatId: true } },
+    },
+  });
 
   let sent = 0;
   for (const cafe of cafes) {
-    const chatId = cafe.telegramChatId;
+    const chatId = cafe.owner.telegramChatId;
     if (!chatId) continue;
     const rawEnd =
       cafe.status === "TRIAL" ? cafe.trialEndsAt : cafe.subscriptionEndsAt;
@@ -1127,7 +804,7 @@ export async function sendSubscriptionExpiryWarnings() {
         `Tugashiga taxminan <b>3 kun</b> qoldi.`,
         `📅 ${end.toLocaleDateString("uz-UZ")}`,
         "",
-        "Davom ettirish uchun dashboard billing bo'limiga o'ting yoki supportga yozing.",
+        "Davom ettirish uchun dashboard billing bo'limiga o'ting.",
       ].join("\n"),
       { inlineKeyboard: ownerMenuKeyboard() },
     );

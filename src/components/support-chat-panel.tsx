@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, ImagePlus, Send } from "lucide-react";
+import { Check, CheckCheck, Send } from "lucide-react";
 
 type ChatMessage = {
   id: string;
@@ -134,28 +134,6 @@ export function SupportChatPanel({
     }
   }
 
-  async function openTelegramPhotoSlot() {
-    if (sending || viewer !== "platform") return;
-    setSending(true);
-    try {
-      const res = await fetch(`${apiBase}/telegram-photo`, { method: "POST" });
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        telegramUrl?: string | null;
-      };
-      if (!res.ok) {
-        window.alert(data.error || "Telegram slot ochilmadi");
-        return;
-      }
-      if (data.telegramUrl) {
-        window.open(data.telegramUrl, "_blank", "noopener,noreferrer");
-      }
-      await load();
-    } finally {
-      setSending(false);
-    }
-  }
-
   return (
     <div className={`support-chat-panel ${variant === "popup" ? "is-popup" : ""}`}>
       <div
@@ -204,18 +182,6 @@ export function SupportChatPanel({
         <div ref={bottomRef} />
       </div>
       <div className="support-chat-compose">
-        {viewer === "platform" && (
-          <button
-            type="button"
-            disabled={sending}
-            className="support-chat-photo-icon"
-            onClick={() => void openTelegramPhotoSlot()}
-            title="Telegramda rasm yuborish (avtomatik shu suhbatga)"
-            aria-label="Telegramga rasm"
-          >
-            <ImagePlus className="h-4 w-4" />
-          </button>
-        )}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}

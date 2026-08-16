@@ -12,7 +12,7 @@ const addStaffSchema = z.object({
   email: z.string().email(),
   phone: z.string().optional(),
   password: z.string().min(6),
-  role: z.enum(["MANAGER", "CASHIER", "WAITER", "KITCHEN", "COURIER"]),
+  role: z.enum(["MANAGER", "CASHIER", "WAITER", "KITCHEN", "COURIER", "WAREHOUSE"]),
   salarySom: z.number().min(0).optional(),
   avatarUrl: z
     .union([z.string().max(800), z.literal(""), z.null()])

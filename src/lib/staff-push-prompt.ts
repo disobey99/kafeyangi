@@ -1,5 +1,7 @@
 const DISMISS_KEY = "kafe-push-prompt-dismissed-at";
-const SNOOZE_MS = 3 * 60 * 60 * 1000; // 3 soatdan keyin qayta eslatish
+/** Modal bir marta yopilgan / ruxsat berilgan — qayta modal chiqmasin */
+const MODAL_DONE_KEY = "kafe-push-prompt-modal-done";
+const SNOOZE_MS = 3 * 60 * 60 * 1000; // 3 soatdan keyin banner eslatishi mumkin
 
 export function getPushPromptDismissedAt(): number | null {
   if (typeof window === "undefined") return null;
@@ -17,7 +19,46 @@ export function clearPushPromptSnooze() {
   localStorage.removeItem(DISMISS_KEY);
 }
 
-/** Hozir modal/banner ko'rsatish kerakmi */
+export function isPushPromptModalDone(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(MODAL_DONE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Keyinroq / Yoqish / brauzer ruxsati — modal qayta chiqmasin */
+export function markPushPromptModalDone() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(MODAL_DONE_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Modal ochilsinmi (banner alohida) */
+export function shouldShowPushPromptModal(opts: {
+  pushEnabled: boolean;
+  permission: NotificationPermission | "unsupported";
+}): boolean {
+  if (opts.pushEnabled && opts.permission === "granted") return false;
+  if (opts.permission === "granted") return false;
+  if (isPushPromptModalDone()) return false;
+
+  // Denied — birinchi marta modal, keyin faqat banner
+  if (opts.permission === "denied") {
+    return !isPushPromptModalDone();
+  }
+
+  const dismissedAt = getPushPromptDismissedAt();
+  if (!dismissedAt) return true;
+  // Keyinroq bosilgan — modal qayta chiqmasin (banner qolishi mumkin)
+  return false;
+}
+
+/** Hozir modal/banner ko'rsatish kerakmi (banner uchun snooze) */
 export function shouldShowPushPrompt(opts: {
   pushSupported: boolean;
   pushEnabled: boolean;
@@ -25,7 +66,8 @@ export function shouldShowPushPrompt(opts: {
 }): boolean {
   if (!opts.pushSupported) return false;
   if (opts.pushEnabled && opts.permission === "granted") return false;
-  if (opts.permission === "denied") return true; // sozlamaga yo'naltirish
+  if (opts.permission === "granted") return false; // ruxsat bor — eslatma shart emas
+  if (opts.permission === "denied") return true; // sozlamaga yo'naltirish (banner)
 
   const dismissedAt = getPushPromptDismissedAt();
   if (!dismissedAt) return true; // birinchi marta

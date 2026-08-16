@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { CafeRole } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { attachSessionCookie, createSessionToken } from "@/lib/auth";
@@ -80,34 +79,11 @@ export async function POST(request: NextRequest) {
     const approvalEnabled = isDeviceLoginApprovalEnabled();
 
     if (approvalEnabled && !isPlatformUser && deviceId) {
-      // Egasi / menejer — parol yetarli, ikkinchi qurilma tasdig'i shart emas
-      const canSelfTrust = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: {
-          ownedCafes: {
-            where: { status: { not: "CANCELLED" } },
-            select: { id: true },
-            take: 1,
-          },
-          memberships: {
-            where: {
-              isActive: true,
-              role: CafeRole.MANAGER,
-              cafe: { status: { not: "CANCELLED" } },
-            },
-            select: { id: true },
-            take: 1,
-          },
-        },
-      });
-      const isOwnerOrManager = Boolean(
-        canSelfTrust?.ownedCafes.length || canSelfTrust?.memberships.length,
-      );
-
+      // Birinchi ishonchli qurilma bor + bu qurilma yangi → boshqa sessiyada tasdiq
       const trustedCount = await countTrustedDevices(user.id);
       const trusted = await isTrustedDevice(user.id, deviceId);
 
-      if (trustedCount > 0 && !trusted && !isOwnerOrManager) {
+      if (trustedCount > 0 && !trusted) {
         const approval = await createLoginApproval({
           userId: user.id,
           deviceId,

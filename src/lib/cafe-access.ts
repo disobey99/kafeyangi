@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 
 const MANAGER_ROLES: CafeRole[] = [CafeRole.OWNER, CafeRole.MANAGER];
 
+/** Egasi, nazoratchi, omborchi — ombor API */
+const INVENTORY_ROLES: CafeRole[] = [
+  CafeRole.OWNER,
+  CafeRole.MANAGER,
+  CafeRole.WAREHOUSE,
+];
+
 const STAFF_ROLES: CafeRole[] = [
   CafeRole.OWNER,
   CafeRole.MANAGER,
@@ -12,6 +19,7 @@ const STAFF_ROLES: CafeRole[] = [
   CafeRole.WAITER,
   CafeRole.KITCHEN,
   CafeRole.COURIER,
+  CafeRole.WAREHOUSE,
 ];
 
 const UNAUTH = NextResponse.json(
@@ -108,6 +116,23 @@ export async function requireCafeCourier(cafeId: string): Promise<AccessResult> 
     CafeRole.OWNER,
     CafeRole.MANAGER,
   ]);
+}
+
+/** Ombor moduli — egasi / nazoratchi / omborchi */
+export async function requireCafeInventory(cafeId: string): Promise<AccessResult> {
+  const result = await requireCafeStaff(cafeId, INVENTORY_ROLES);
+  if (!result.ok) {
+    if (result.response.status === 403) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Faqat egasi, nazoratchi yoki omborchi" },
+          { status: 403 },
+        ),
+      };
+    }
+  }
+  return result;
 }
 
 export async function requireCafeStaff(

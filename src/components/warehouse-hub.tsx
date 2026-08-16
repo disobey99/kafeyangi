@@ -12,6 +12,11 @@ import {
   Truck,
   Warehouse,
 } from "lucide-react";
+import {
+  formatQtyBase,
+  fromQtyBase,
+  toQtyBase,
+} from "@/lib/warehouse-units";
 
 type MaterialStock = {
   id: string;
@@ -48,7 +53,7 @@ type ExpiryLot = {
   lotCode: string;
   qtyBase: number;
   expiresAt: string;
-  rawMaterial: { name: string };
+  rawMaterial: { name: string; baseUnit?: string };
   warehouse: { name: string };
 };
 
@@ -136,7 +141,7 @@ export function WarehouseHub({
       lotCode: string;
       qtyBase: number;
       expiresAt: string | null;
-      rawMaterial: { name: string };
+      rawMaterial: { name: string; baseUnit?: string };
     }>
   >([]);
   const [counts, setCounts] = useState<CountSession[]>([]);
@@ -274,7 +279,7 @@ export function WarehouseHub({
           name,
           baseUnit: newMaterialUnit,
           unitKind: unitKindFor(newMaterialUnit),
-          minQtyBase: Number(newMaterialMin) || 0,
+          minQtyBase: toQtyBase(newMaterialUnit, Number(newMaterialMin) || 0),
           trackLots: true,
         }),
       });
@@ -292,11 +297,15 @@ export function WarehouseHub({
     }
   }
 
-  async function saveMinQty(materialId: string, minQtyBase: number) {
+  async function saveMinQty(
+    materialId: string,
+    displayMin: number,
+    baseUnit: string,
+  ) {
     const res = await fetch(`/api/cafes/${cafeId}/warehouse/materials/${materialId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ minQtyBase }),
+      body: JSON.stringify({ minQtyBase: toQtyBase(baseUnit, displayMin) }),
     });
     if (!res.ok) {
       const data = await res.json();
@@ -416,10 +425,16 @@ export function WarehouseHub({
     if (countBusy || stock.length === 0) return;
     setCountBusy(true);
     try {
-      const lines = stock.map((m) => ({
-        rawMaterialId: m.id,
-        countedQtyBase: Number(countLines[m.id] ?? m.balanceBase) || 0,
-      }));
+      const lines = stock.map((m) => {
+        const display =
+          countLines[m.id] !== undefined && countLines[m.id] !== ""
+            ? Number(countLines[m.id])
+            : fromQtyBase(m.baseUnit, m.balanceBase);
+        return {
+          rawMaterialId: m.id,
+          countedQtyBase: toQtyBase(m.baseUnit, Number(display) || 0),
+        };
+      });
       const res = await fetch(`/api/cafes/${cafeId}/warehouse/counts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -550,7 +565,8 @@ export function WarehouseHub({
                         <div className="min-w-0">
                           <p className="font-medium text-[var(--dp-text)]">{row.name}</p>
                           <p className="text-xs text-[var(--dp-muted)]">
-                            Min: {row.minQtyBase ?? 0} {row.baseUnit}
+                            Min:{" "}
+                            {formatQtyBase(row.minQtyBase ?? 0, row.baseUnit)}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -558,15 +574,25 @@ export function WarehouseHub({
                             className="input w-24 py-1 text-xs"
                             type="number"
                             min={0}
-                            defaultValue={row.minQtyBase ?? 0}
-                            title="Minimum qoldiq"
+                            step="any"
+                            defaultValue={fromQtyBase(
+                              row.baseUnit,
+                              row.minQtyBase ?? 0,
+                            )}
+                            title={`Minimum qoldiq (${row.baseUnit})`}
                             onBlur={(e) => {
                               const v = Number(e.target.value) || 0;
-                              if (v !== (row.minQtyBase ?? 0)) void saveMinQty(row.id, v);
+                              const prev = fromQtyBase(
+                                row.baseUnit,
+                                row.minQtyBase ?? 0,
+                              );
+                              if (v !== prev) {
+                                void saveMinQty(row.id, v, row.baseUnit);
+                              }
                             }}
                           />
                           <p className="min-w-[4.5rem] text-right font-semibold text-[var(--dp-accent)]">
-                            {row.balanceBase} {row.baseUnit}
+                            {formatQtyBase(row.balanceBase, row.baseUnit)}
                           </p>
                         </div>
                       </div>
@@ -833,7 +859,12 @@ export function WarehouseHub({
                         {lot.rawMaterial.name} · {lot.lotCode}
                       </p>
                       <p className="text-xs text-[var(--dp-muted)]">
-                        Qoldiq: {lot.qtyBase} · Expiry:{" "}
+                        Qoldiq:{" "}
+                        {formatQtyBase(
+                          lot.qtyBase,
+                          lot.rawMaterial.baseUnit ?? "G",
+                        )}{" "}
+                        · Expiry:{" "}
                         {lot.expiresAt
                           ? new Date(lot.expiresAt).toLocaleDateString("uz-UZ")
                           : "—"}
@@ -870,14 +901,17 @@ export function WarehouseHub({
                         <div>
                           <p className="font-medium text-[var(--dp-text)]">{m.name}</p>
                           <p className="text-xs text-[var(--dp-muted)]">
-                            Tizim: {m.balanceBase} {m.baseUnit}
+                            Tizim: {formatQtyBase(m.balanceBase, m.baseUnit)}
                           </p>
                         </div>
                         <input
                           className="input w-28"
                           type="number"
                           min={0}
-                          placeholder={String(m.balanceBase)}
+                          step="any"
+                          placeholder={String(
+                            fromQtyBase(m.baseUnit, m.balanceBase),
+                          )}
                           value={countLines[m.id] ?? ""}
                           onChange={(e) =>
                             setCountLines((prev) => ({ ...prev, [m.id]: e.target.value }))
@@ -995,8 +1029,8 @@ export function WarehouseHub({
                       >
                         <p className="font-medium text-[var(--dp-text)]">{a.name}</p>
                         <p className="text-xs text-[var(--dp-muted)]">
-                          Hozir: {a.currentQtyBase} {a.baseUnit} · Min: {a.minQtyBase}{" "}
-                          {a.baseUnit}
+                          Hozir: {formatQtyBase(a.currentQtyBase, a.baseUnit)} ·
+                          Min: {formatQtyBase(a.minQtyBase, a.baseUnit)}
                         </p>
                       </div>
                     ))}
@@ -1020,8 +1054,12 @@ export function WarehouseHub({
                           {lot.rawMaterial.name} · {lot.lotCode}
                         </p>
                         <p className="text-xs text-[var(--dp-muted)]">
-                          {lot.warehouse.name} · {lot.qtyBase} ·{" "}
-                          {new Date(lot.expiresAt).toLocaleDateString("uz-UZ")}
+                          {lot.warehouse.name} ·{" "}
+                          {formatQtyBase(
+                            lot.qtyBase,
+                            lot.rawMaterial.baseUnit ?? "G",
+                          )}{" "}
+                          · {new Date(lot.expiresAt).toLocaleDateString("uz-UZ")}
                         </p>
                       </div>
                     ))}
@@ -1068,7 +1106,7 @@ export function WarehouseHub({
                       >
                         <span className="text-[var(--dp-text)]">{r.name}</span>
                         <span className="font-semibold text-[var(--dp-accent)]">
-                          {r.qtyBase} {r.baseUnit}
+                          {formatQtyBase(r.qtyBase, r.baseUnit)}
                         </span>
                       </div>
                     ))}
@@ -1097,7 +1135,11 @@ export function WarehouseHub({
                           }
                         >
                           {v.varianceQtyBase > 0 ? "+" : ""}
-                          {v.varianceQtyBase} {v.rawMaterial.baseUnit}
+                          {formatQtyBase(
+                            Math.abs(v.varianceQtyBase),
+                            v.rawMaterial.baseUnit,
+                          )}
+                          {v.varianceQtyBase < 0 ? " (kam)" : ""}
                         </span>
                       </div>
                     ))}

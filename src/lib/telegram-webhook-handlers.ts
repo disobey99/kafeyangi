@@ -1,6 +1,4 @@
-import { fulfillTelegramPasswordReset } from "@/lib/password-reset";
 import {
-  activateAdminPhotoPendingFromStart,
   fulfillOwnerTelegramLink,
   handleBotMediaMessage,
   handleBotTextMessage,
@@ -101,9 +99,9 @@ export async function handleCustomerBotUpdate(update: TgUpdate) {
       payload === "owner" ||
       payload.startsWith("link_") ||
       payload.startsWith("rst_") ||
-      payload.startsWith("aphoto_") ||
       payload === "help_reset"
     ) {
+      // rst_/help_reset — eski deep-link; endi faqat email tiklash
       const supportUser = process.env.TELEGRAM_SUPPORT_BOT_USERNAME?.replace(
         /^@/,
         "",
@@ -203,17 +201,12 @@ async function handleSupportStartPayload(
   payload: string,
   replyBot: TelegramBotRole,
 ): Promise<boolean> {
-  if (payload.startsWith("rst_")) {
-    const linkId = payload.slice(4);
-    if (linkId.length >= 16) {
-      await fulfillTelegramPasswordReset(linkId, chatId);
-    } else {
-      await sendTelegramMessage(
-        chatId,
-        "Havola noto'g'ri. Saytdagi «Kodni qayta olish (Telegram)» dan qayta bosing.",
-        { bot: replyBot },
-      );
-    }
+  if (payload.startsWith("rst_") || payload === "help_reset") {
+    await sendTelegramMessage(
+      chatId,
+      "Parol tiklash endi faqat email orqali.\nSaytda «Parolni unutdingizmi?» → emailga kod.\n3 urinishdan keyin — supportga murojaat qiling.",
+      { bot: replyBot },
+    );
     return true;
   }
 
@@ -229,20 +222,12 @@ async function handleSupportStartPayload(
     return true;
   }
 
-  if (payload === "help_reset") {
+  if (payload.startsWith("aphoto_")) {
     await sendTelegramMessage(
       chatId,
-      "Parol tiklash: saytda email → «Kodni qayta olish (Telegram)».",
+      "📷 Telegram orqali rasm yuborish o‘chirilgan. Matn — saytdagi Platforma Support orqali.",
       { bot: replyBot },
     );
-    return true;
-  }
-
-  if (payload.startsWith("aphoto_")) {
-    const cafeId = payload.slice("aphoto_".length);
-    if (cafeId.length >= 8) {
-      await activateAdminPhotoPendingFromStart(chatId, cafeId);
-    }
     return true;
   }
 
@@ -264,27 +249,26 @@ async function handleSupportMessageBody(
   const isImageDoc = !!doc?.mime_type?.startsWith("image/");
 
   if (hasPhoto || isImageDoc) {
-    const linked = await findOwnerByChatId(chatId);
-    if (!linked?.cafe && !isPlatformAdmin(chatId)) {
-      // Alohida support botda — mehmon ham skrinshot yuborishi mumkin (support oqimi)
-      if (hasSeparateSupportBot()) {
-        await handleBotMediaMessage({
-          chatId,
-          messageId: message.message_id,
-          caption: message.caption,
-          replyToMessageId: message.reply_to_message?.message_id,
-        });
-        return;
-      }
-      await sendCustomerTextHint(chatId);
+    // Rasm → platforma oqimi o‘chirilgan; egasi/mehmonga qisqa javob
+    if (hasSeparateSupportBot() || (await findOwnerByChatId(chatId))?.cafe) {
+      await handleBotMediaMessage({
+        chatId,
+        messageId: message.message_id,
+        caption: message.caption,
+        replyToMessageId: message.reply_to_message?.message_id,
+      });
       return;
     }
-    await handleBotMediaMessage({
-      chatId,
-      messageId: message.message_id,
-      caption: message.caption,
-      replyToMessageId: message.reply_to_message?.message_id,
-    });
+    if (isPlatformAdmin(chatId)) {
+      await handleBotMediaMessage({
+        chatId,
+        messageId: message.message_id,
+        caption: message.caption,
+        replyToMessageId: message.reply_to_message?.message_id,
+      });
+      return;
+    }
+    await sendCustomerTextHint(chatId);
     return;
   }
 

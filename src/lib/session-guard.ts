@@ -43,6 +43,7 @@ export async function requirePlatformMenu(
       "menu.payments": "/platform/payments",
       "menu.map": "/platform/map",
       "menu.reports": "/platform/reports",
+      "menu.shopping": "/platform/shopping",
       "menu.support": "/platform/support",
       "menu.settings": "/platform/settings",
     };
@@ -132,6 +133,12 @@ export async function requireDashboardAccess(): Promise<
   const isManager = user?.memberships.some((m) => m.role === CafeRole.MANAGER);
   if (isManager) return session;
 
+  // Omborchi — dashboard ichida faqat ombor
+  const isWarehouse = user?.memberships.some(
+    (m) => m.role === CafeRole.WAREHOUSE,
+  );
+  if (isWarehouse) return session;
+
   // Xodim (kassir / ofitsiant / oshxona) — faqat o'z oynasiga
   await redirectStaffHome(session);
   throw new Error("Unreachable: staff redirect should have happened");
@@ -166,6 +173,7 @@ async function redirectByRole(
   if (role === CafeRole.CASHIER) redirect(`/cashier/${cafeId}`);
   if (role === CafeRole.WAITER) redirect(`/staff/${cafeId}`);
   if (role === CafeRole.KITCHEN) redirect(`/kitchen/${cafeId}`);
+  if (role === CafeRole.WAREHOUSE) redirect(`/dashboard/${cafeId}/warehouse`);
   if (role === CafeRole.COURIER) {
     if (session) {
       await redirectStaffHome(session);

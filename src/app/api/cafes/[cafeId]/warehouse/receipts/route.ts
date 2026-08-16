@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { UnitCode, WarehouseMovementType } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireCafeManager } from "@/lib/cafe-access";
+import { requireCafeInventory } from "@/lib/cafe-access";
 import { checkPlanFeature } from "@/lib/plan-access";
-import { createStockMovement, getOrCreatePrimaryWarehouse } from "@/lib/warehouse";
+import {
+  createStockMovement,
+  getOrCreatePrimaryWarehouse,
+  repairDoubledLots,
+  toQtyBase,
+} from "@/lib/warehouse";
 
 const schema = z.object({
   supplierId: z.string().nullable().optional(),
@@ -30,81 +35,96 @@ export async function POST(
 ) {
   try {
     const { cafeId } = await params;
-    const access = await requireCafeManager(cafeId);
+    const access = await requireCafeInventory(cafeId);
     if (!access.ok) return access.response;
     const feature = await checkPlanFeature(cafeId, "inventoryRation");
     if (!feature.ok) return NextResponse.json({ error: feature.error }, { status: 403 });
 
     const body = schema.parse(await request.json());
     const warehouse = body.warehouseId
-      ? await prisma.warehouse.findFirst({ where: { id: body.warehouseId, cafeId } })
+      ? await prisma.warehouse.findFirst({
+          where: { id: body.warehouseId, cafeId },
+        })
       : await getOrCreatePrimaryWarehouse(cafeId);
-    if (!warehouse) return NextResponse.json({ error: "Ombor topilmadi" }, { status: 404 });
+    if (!warehouse) {
+      return NextResponse.json({ error: "Ombor topilmadi" }, { status: 404 });
+    }
+
+    await repairDoubledLots(cafeId).catch(() => {});
 
     const receiptNo = `RCPT-${Date.now()}`;
-    const receipt = await prisma.goodsReceipt.create({
-      data: {
-        cafeId,
-        warehouseId: warehouse.id,
-        supplierId: body.supplierId ?? null,
-        receiptNo,
-        note: body.note ?? null,
-        createdBy: access.session.userId,
-      },
-    });
 
-    for (const item of body.items) {
-      const qtyBase =
-        item.unit === UnitCode.KG || item.unit === UnitCode.L ? item.qty * 1000 : item.qty;
-      const lotCode = item.lotCode?.trim() || `${item.rawMaterialId}-${Date.now()}`;
-      const lot = await prisma.materialLot.create({
+    const receiptId = await prisma.$transaction(async (tx) => {
+      const receipt = await tx.goodsReceipt.create({
         data: {
           cafeId,
           warehouseId: warehouse.id,
-          rawMaterialId: item.rawMaterialId,
-          lotCode,
-          expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
-          unitCostTiyinBase: item.unitCostTiyin,
-          qtyBase,
-          initialQtyBase: qtyBase,
           supplierId: body.supplierId ?? null,
-          goodsReceiptId: receipt.id,
+          receiptNo,
+          note: body.note ?? null,
+          createdBy: access.session.userId,
         },
       });
 
-      await prisma.goodsReceiptItem.create({
-        data: {
+      for (const item of body.items) {
+        const qtyBase = toQtyBase(item.unit, item.qty);
+        const lotCode =
+          item.lotCode?.trim() || `${item.rawMaterialId.slice(-6)}-${Date.now()}`;
+
+        // qtyBase=0 — miqdor createStockMovement orqali qo‘shiladi (double-count yo‘q)
+        const lot = await tx.materialLot.create({
+          data: {
+            cafeId,
+            warehouseId: warehouse.id,
+            rawMaterialId: item.rawMaterialId,
+            lotCode,
+            expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
+            unitCostTiyinBase: item.unitCostTiyin,
+            qtyBase: 0,
+            initialQtyBase: qtyBase,
+            supplierId: body.supplierId ?? null,
+            goodsReceiptId: receipt.id,
+          },
+        });
+
+        await tx.goodsReceiptItem.create({
+          data: {
+            cafeId,
+            goodsReceiptId: receipt.id,
+            rawMaterialId: item.rawMaterialId,
+            unit: item.unit,
+            qty: Math.round(item.qty),
+            qtyBase,
+            unitCostTiyin: item.unitCostTiyin,
+            lotCode,
+            expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
+          },
+        });
+
+        await createStockMovement({
+          tx,
           cafeId,
-          goodsReceiptId: receipt.id,
+          warehouseId: warehouse.id,
           rawMaterialId: item.rawMaterialId,
+          movementType: WarehouseMovementType.RECEIPT,
           unit: item.unit,
           qty: item.qty,
-          qtyBase,
+          lotId: lot.id,
           unitCostTiyin: item.unitCostTiyin,
-          lotCode,
-          expiresAt: item.expiresAt ? new Date(item.expiresAt) : null,
-        },
-      });
+          refType: "GOODS_RECEIPT",
+          refId: receipt.id,
+          note: body.note ?? null,
+          actorUserId: access.session.userId,
+        });
+      }
 
-      await createStockMovement({
-        cafeId,
-        warehouseId: warehouse.id,
-        rawMaterialId: item.rawMaterialId,
-        movementType: WarehouseMovementType.RECEIPT,
-        unit: item.unit,
-        qty: item.qty,
-        lotId: lot.id,
-        unitCostTiyin: item.unitCostTiyin,
-        refType: "GOODS_RECEIPT",
-        refId: receipt.id,
-        note: body.note ?? null,
-        actorUserId: access.session.userId,
-      });
-    }
+      return receipt.id;
+    });
 
-    return NextResponse.json({ receiptId: receipt.id, receiptNo }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Kirim ma'lumotlari noto'g'ri" }, { status: 400 });
+    return NextResponse.json({ receiptId, receiptNo }, { status: 201 });
+  } catch (e) {
+    console.error("[warehouse/receipts]", e);
+    const msg = e instanceof Error ? e.message : "Kirim ma'lumotlari noto'g'ri";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
-

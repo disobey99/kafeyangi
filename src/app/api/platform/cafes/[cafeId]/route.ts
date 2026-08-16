@@ -244,7 +244,11 @@ export async function PATCH(
     }
 
     applyPlatformSubscriptionPatch(
-      existing[0],
+      {
+        status: existing[0].status,
+        trialEndsAt: parseDbDate(existing[0].trialEndsAt),
+        subscriptionEndsAt: parseDbDate(existing[0].subscriptionEndsAt),
+      },
       {
         status: body.status,
         plan: body.plan,

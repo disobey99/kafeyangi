@@ -1,4 +1,4 @@
-const CACHE = "kafe-v5";
+const CACHE = "kafe-v6";
 const API_CACHE = "kafe-api-v2";
 
 const OFFLINE_SHELL = ["/icons/icon.svg"];
@@ -21,10 +21,18 @@ function shouldSkipCache(pathname) {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(OFFLINE_SHELL))
-      .then(() => self.skipWaiting())
+    (async () => {
+      const cache = await caches.open(CACHE);
+      await cache.addAll(OFFLINE_SHELL);
+      // Birinchi o'rnatish: darhol aktiv. Yangilanish: foydalanuvchi "Yangilash" bosadi.
+      const windowClients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      if (windowClients.length === 0) {
+        await self.skipWaiting();
+      }
+    })(),
   );
 });
 
@@ -33,9 +41,13 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE && k !== API_CACHE).map((k) => caches.delete(k)))
+        Promise.all(
+          keys
+            .filter((k) => k !== CACHE && k !== API_CACHE)
+            .map((k) => caches.delete(k)),
+        ),
       )
-      .then(() => self.clients.claim())
+      .then(() => self.clients.claim()),
   );
 });
 

@@ -4,6 +4,13 @@ import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { isTheme, resolveThemeForSSR } from "@/lib/theme";
+import {
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_OG_IMAGE,
+  SITE_TITLE,
+  getSeoSiteUrl,
+} from "@/lib/site-seo";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,9 +23,62 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const siteUrl = getSeoSiteUrl();
+
 export const metadata: Metadata = {
-  title: "Nookline — Kafe boshqaruv tizimi",
-  description: "QR menyu, buyurtmalar, kassa va hisobotlar",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: SITE_TITLE,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    "Nookline",
+    "kafe boshqaruv",
+    "restoran POS",
+    "QR menyu",
+    "onlayn buyurtma",
+    "kassa",
+    "ofitsiant",
+    "oshxona",
+  ],
+  authors: [{ name: SITE_NAME }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "uz_UZ",
+    url: siteUrl,
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [
+      {
+        url: SITE_OG_IMAGE,
+        width: 512,
+        height: 512,
+        alt: "Nookline — Kafe va Restoran Boshqaruv Tizimi",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [SITE_OG_IMAGE],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
+  },
   manifest: "/staff.webmanifest",
   appleWebApp: {
     capable: true,

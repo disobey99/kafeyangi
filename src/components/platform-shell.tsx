@@ -97,14 +97,18 @@ export function PlatformShell({
         storageKey="nookline-platform-intro-seen"
         durationMs={2000}
       />
-      <div className="platform-shell flex min-h-full flex-col md:flex-row">
-        <aside className="platform-sidebar hidden w-64 shrink-0 flex-col border-r md:flex">
-          <div className="platform-sidebar-section border-b p-6">{brand}</div>
-          <PlatformNav permissions={permissions} />
-          {sidebarFooter}
+      <div className="platform-shell flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden md:flex-row">
+        <aside className="platform-sidebar hidden h-full w-64 shrink-0 flex-col border-r md:flex">
+          <div className="platform-sidebar-section shrink-0 border-b p-6">
+            {brand}
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <PlatformNav permissions={permissions} />
+          </div>
+          <div className="shrink-0">{sidebarFooter}</div>
         </aside>
 
-        <header className="platform-mobile-bar sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2.5 md:hidden">
+        <header className="platform-mobile-bar sticky top-0 z-30 flex shrink-0 items-center gap-2 border-b px-3 py-2.5 md:hidden">
           <button
             type="button"
             className="platform-mobile-menu-btn inline-flex h-10 w-10 items-center justify-center rounded-xl"
@@ -161,7 +165,7 @@ export function PlatformShell({
           </div>
         )}
 
-        <main className="platform-main min-w-0 flex-1 overflow-auto p-4 md:p-8">
+        <main className="platform-main min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-4 md:p-8">
           <PlatformInstallHint />
           {children}
         </main>

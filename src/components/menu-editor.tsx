@@ -22,6 +22,7 @@ import { ProductModifiersEditor } from "@/components/product-modifiers-editor";
 import { ModifierHelpHint } from "@/components/modifier-help-hint";
 import { MenuTemplatePicker } from "@/components/menu-template-picker";
 import { MenuFoodVisual } from "@/components/menu-food-visual";
+import { ProductRecipeEditor } from "@/components/product-recipe-editor";
 
 type Product = {
   id: string;
@@ -878,6 +879,13 @@ function ProductForm({
             className="input mt-2"
           />
         </div>
+        {product ? (
+          <ProductRecipeEditor cafeId={cafeId} productId={product.id} />
+        ) : (
+          <p className="sm:col-span-2 text-xs text-[var(--dp-muted)]">
+            Retseptni taomni saqlagandan keyin qo‘shish mumkin (Ombor ratsiyasi).
+          </p>
+        )}
       </div>
 
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}

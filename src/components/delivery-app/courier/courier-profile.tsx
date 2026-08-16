@@ -404,24 +404,7 @@ export function CourierProfileScreen({
         </button>
       </section>
 
-      {bioSupported ? (
-        <StaffBiometricSettings cafeId={cafeId} />
-      ) : (
-        <section className="rounded-2xl border border-dashed border-stone-200 bg-white px-4 py-3">
-          <p className="flex items-center gap-2 text-sm font-bold text-stone-700">
-            <Fingerprint className="h-4 w-4" style={{ color: primaryColor }} />
-            {locale === "ru" ? "Отпечатком пальца / Face ID" : locale === "en" ? "Fingerprint / Face ID" : "Barmoq izi / Face ID"}
-          </p>
-          <p className="mt-1 text-xs text-stone-400">
-            {locale === "ru" 
-              ? "На этом устройстве нет биометрии или требуется HTTPS (после деплоя)." 
-              : locale === "en" 
-              ? "No biometrics on this device or HTTPS required (after deploy)." 
-              : "Bu qurilmada biometriya yo'q yoki HTTPS kerak (deploy dan keyin)."
-            }
-          </p>
-        </section>
-      )}
+      <StaffBiometricSettings cafeId={cafeId} />
 
       <section className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
         <p className="flex items-center gap-2 text-sm font-extrabold text-stone-900">

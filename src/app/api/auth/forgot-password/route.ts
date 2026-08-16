@@ -16,22 +16,28 @@ export async function POST(request: NextRequest) {
     const ip = clientIpFromHeaders(request.headers);
     const ipLimit = checkRateLimit({
       key: `forgot:ip:${ip}`,
-      limit: 10,
+      limit: 8,
       windowMs: 15 * 60 * 1000,
     });
     if (!ipLimit.ok) {
-      return rateLimitResponse(ipLimit.retryAfterSec);
+      return rateLimitResponse(
+        ipLimit.retryAfterSec,
+        `Juda ko‘p so‘rov. ${ipLimit.retryAfterSec} soniyadan keyin qayta urinib ko‘ring.`,
+      );
     }
 
     const body = schema.parse(await request.json());
     const emailKey = body.email.trim().toLowerCase();
     const emailLimit = checkRateLimit({
       key: `forgot:email:${emailKey}`,
-      limit: 5,
+      limit: 6,
       windowMs: 15 * 60 * 1000,
     });
     if (!emailLimit.ok) {
-      return rateLimitResponse(emailLimit.retryAfterSec);
+      return rateLimitResponse(
+        emailLimit.retryAfterSec,
+        `Bu email uchun hozircha kutish kerak (${emailLimit.retryAfterSec} s).`,
+      );
     }
 
     const result = await requestPasswordReset(body.email);
@@ -39,16 +45,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: result.error,
-          useTelegramForResend: "useTelegramForResend" in result ? result.useTelegramForResend : true,
+          locked: "locked" in result ? result.locked : false,
+          support: "support" in result ? result.support : undefined,
+          retryAfterSec: "retryAfterSec" in result ? result.retryAfterSec : undefined,
+          sendsLeft: "sendsLeft" in result ? result.sendsLeft : undefined,
         },
-        { status: result.status },
+        {
+          status: result.status,
+          headers:
+            "retryAfterSec" in result && result.retryAfterSec
+              ? { "Retry-After": String(result.retryAfterSec) }
+              : undefined,
+        },
       );
     }
     return NextResponse.json({
       ok: true,
       message: result.message,
-      useTelegramForResend: result.useTelegramForResend,
       emailSent: result.emailSent,
+      sendsLeft: result.sendsLeft,
+      support: result.support,
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

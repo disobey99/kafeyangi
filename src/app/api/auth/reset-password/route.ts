@@ -38,7 +38,15 @@ export async function POST(request: NextRequest) {
 
     const result = await resetPasswordWithCode(body);
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(
+        {
+          error: result.error,
+          locked: "locked" in result ? result.locked : false,
+          support: "support" in result ? result.support : undefined,
+          attemptsLeft: "attemptsLeft" in result ? result.attemptsLeft : undefined,
+        },
+        { status: result.status },
+      );
     }
     return NextResponse.json({ ok: true, message: result.message });
   } catch (err) {

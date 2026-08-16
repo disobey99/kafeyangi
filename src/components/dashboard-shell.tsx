@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -22,6 +22,7 @@ import {
   PanelLeftOpen,
   Package,
   Settings,
+  ShoppingBag,
   Smartphone,
   Truck,
   UserCheck,
@@ -65,11 +66,19 @@ type NavItem = {
   orderBadge?: boolean;
   /** Tarif bo'yicha soft-lock */
   feature?: keyof PlanFeatures;
+  /** Sidebarda boshqa tugmalardan ajralib turadigan accent */
+  accent?: "shopping";
 };
 
 const mainNav = (cafeId: string): NavItem[] => [
   { href: "/dashboard", label: "Bosh sahifa", icon: LayoutDashboard, exact: true },
   { href: `/dashboard/${cafeId}/menu`, label: "Menyu", icon: UtensilsCrossed },
+  {
+    href: `/dashboard/${cafeId}/online-store`,
+    label: "Onlayn do'kon",
+    icon: ShoppingBag,
+    accent: "shopping",
+  },
   {
     href: `/dashboard/${cafeId}/warehouse`,
     label: "Ombor",
@@ -339,6 +348,7 @@ function SidebarNav({
   isActive,
   onNavigate,
   lockedFeatures,
+  warehouseOnly = false,
 }: {
   cafe: CafeOption;
   productCount: number;
@@ -346,7 +356,28 @@ function SidebarNav({
   isActive: (item: NavItem) => boolean;
   onNavigate?: () => void;
   lockedFeatures: Partial<Record<keyof PlanFeatures, boolean>>;
+  warehouseOnly?: boolean;
 }) {
+  if (warehouseOnly) {
+    const items = mainNav(cafe.id).filter((i) =>
+      i.href.includes("/warehouse"),
+    );
+    return (
+      <nav className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
+        <NavSection
+          title="Ombor"
+          items={items}
+          isActive={isActive}
+          onNavigate={onNavigate}
+          defaultOpen
+          productCount={productCount}
+          pendingOrders={pendingOrders}
+          lockedFeatures={lockedFeatures}
+        />
+      </nav>
+    );
+  }
+
   return (
     <nav className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
       <NavSection
@@ -484,6 +515,7 @@ function NavSection({
               const active = isActive(item);
               const Icon = item.icon;
               const locked = Boolean(item.feature && lockedFeatures[item.feature]);
+              const shopping = item.accent === "shopping";
               return (
                 <li key={item.href}>
                   <Link
@@ -491,14 +523,26 @@ function NavSection({
                     onClick={onNavigate}
                     title={locked ? "Yuqori tarifda ochiladi" : undefined}
                     className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
-                      active ? "dp-nav-active" : "dp-nav-item"
+                      shopping
+                        ? active
+                          ? "bg-emerald-500 text-white shadow-md shadow-emerald-900/30 ring-1 ring-emerald-300/40"
+                          : "bg-emerald-500/18 text-emerald-300 ring-1 ring-emerald-400/35 hover:bg-emerald-500/28 hover:text-emerald-200"
+                        : active
+                          ? "dp-nav-active"
+                          : "dp-nav-item"
                     }`}
                   >
                     <Icon
-                      className="dp-nav-icon h-[18px] w-[18px] shrink-0"
-                      strokeWidth={active ? 2.25 : 1.75}
+                      className={`h-[18px] w-[18px] shrink-0 ${
+                        shopping ? "text-inherit" : "dp-nav-icon"
+                      }`}
+                      strokeWidth={active || shopping ? 2.25 : 1.75}
                     />
-                    <span className={`truncate ${locked ? "opacity-80" : ""}`}>
+                    <span
+                      className={`truncate ${locked ? "opacity-80" : ""} ${
+                        shopping ? "font-semibold tracking-wide" : ""
+                      }`}
+                    >
                       {item.label}
                     </span>
                     {locked && (
@@ -542,16 +586,19 @@ export function DashboardShell({
   cafe,
   userId,
   userName,
+  warehouseOnly = false,
   children,
 }: {
   cafes: CafeOption[];
   cafe: CafeOption | undefined;
   userId: string;
   userName: string;
+  warehouseOnly?: boolean;
   children: React.ReactNode;
 }) {
   useHardwareBackGuard(true);
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -587,6 +634,14 @@ export function DashboardShell({
     }
     return cafe ?? cafes[0];
   }, [pathname, cafes, cafe]);
+
+  useEffect(() => {
+    if (!warehouseOnly || !activeCafe?.id) return;
+    const allowed = pathname.startsWith(`/dashboard/${activeCafe.id}/warehouse`);
+    if (!allowed) {
+      router.replace(`/dashboard/${activeCafe.id}/warehouse`);
+    }
+  }, [warehouseOnly, activeCafe?.id, pathname, router]);
 
   const dashboardTheme = dashboardThemeClass(
     liveTheme ?? activeCafe?.dashboardTheme ?? "CLASSIC",
@@ -649,15 +704,18 @@ export function DashboardShell({
         isActive={isActive}
         onNavigate={() => setMobileOpen(false)}
         lockedFeatures={lockedFeatures}
+        warehouseOnly={warehouseOnly}
       />
-      <div className="shrink-0 px-4 pb-1.5 pt-1">
-        <DashboardPlanUpgradeCard cafeId={activeCafe.id} />
-      </div>
+      {!warehouseOnly && (
+        <div className="shrink-0 px-4 pb-1.5 pt-1">
+          <DashboardPlanUpgradeCard cafeId={activeCafe.id} />
+        </div>
+      )}
       <SidebarFooter
         userName={userName}
         userId={userId}
-        cafeId={activeCafe.id}
-        onThemeChange={handleThemeChange}
+        cafeId={warehouseOnly ? undefined : activeCafe.id}
+        onThemeChange={warehouseOnly ? undefined : handleThemeChange}
       />
     </>
   ) : (
@@ -668,17 +726,18 @@ export function DashboardShell({
   );
 
   const sidebarStyle = { borderColor: "var(--dp-sidebar-border)" };
-  const desktopSidebarWidth = sidebarCollapsed
-    ? SIDEBAR_WIDTH_COLLAPSED
-    : SIDEBAR_WIDTH_EXPANDED;
+  const desktopSidebarWidth =
+    warehouseOnly || !sidebarCollapsed
+      ? SIDEBAR_WIDTH_EXPANDED
+      : SIDEBAR_WIDTH_COLLAPSED;
 
   return (
     <div className="dashboard-panel flex min-h-screen" data-dp-theme={dashboardTheme}>
       <SessionWatchdog />
-      {activeCafe && (
+      {activeCafe && !warehouseOnly && (
         <CafeOrderNotifier cafeId={activeCafe.id} cafeName={activeCafe.name} />
       )}
-      {activeCafe && <PlanUpsellPopup cafeId={activeCafe.id} />}
+      {activeCafe && !warehouseOnly && <PlanUpsellPopup cafeId={activeCafe.id} />}
 
       {/* Desktop: yig'iladigan sidebar */}
       <aside
@@ -692,7 +751,7 @@ export function DashboardShell({
         data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
       >
         <div className="dp-sidebar-inner flex min-h-0 flex-1 flex-col">
-          {sidebarCollapsed && activeCafe ? (
+          {sidebarCollapsed && activeCafe && !warehouseOnly ? (
             <SidebarRail
               cafe={activeCafe}
               userId={userId}
@@ -706,7 +765,9 @@ export function DashboardShell({
             expandedSidebar
           )}
         </div>
-        <SidebarEdgeHandle collapsed={sidebarCollapsed} onToggle={toggleDesktopSidebar} />
+        {!warehouseOnly && (
+          <SidebarEdgeHandle collapsed={sidebarCollapsed} onToggle={toggleDesktopSidebar} />
+        )}
       </aside>
 
       {mobileOpen && (

@@ -7,7 +7,7 @@ import { useStaffPinIdleLock } from "@/lib/staff-pin-client";
 import {
   authenticateStaffBiometric,
   biometricUserMessage,
-  isStaffBiometricAvailable,
+  canInvokeStaffBiometric,
   registerStaffBiometric,
 } from "@/lib/staff-webauthn-client";
 
@@ -67,7 +67,7 @@ export function StaffPinGuard({
       })
       .catch(() => {});
 
-    void isStaffBiometricAvailable().then(setBioSupported);
+    void canInvokeStaffBiometric().then(setBioSupported);
 
     function onPinReset() {
       setPin("");

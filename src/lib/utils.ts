@@ -35,6 +35,7 @@ export function cafeRoleLabel(role: string): string {
     WAITER: "Ofitsiant",
     KITCHEN: "Oshxona",
     COURIER: "Yetkazuvchi",
+    WAREHOUSE: "Omborchi",
   };
   return labels[role] ?? role;
 }

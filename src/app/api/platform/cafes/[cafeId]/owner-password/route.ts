@@ -45,10 +45,18 @@ export async function POST(
     }
 
     const passwordHash = await bcrypt.hash(body.password, 10);
-    await prisma.user.update({
-      where: { id: cafe.ownerId },
-      data: { passwordHash },
-    });
+    const now = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: cafe.ownerId },
+        data: { passwordHash, passwordChangedAt: now },
+      }),
+      prisma.session.deleteMany({ where: { userId: cafe.ownerId } }),
+      prisma.passwordResetToken.updateMany({
+        where: { userId: cafe.ownerId, usedAt: null },
+        data: { usedAt: now },
+      }),
+    ]);
 
     return NextResponse.json({
       ok: true,
@@ -60,6 +68,8 @@ export async function POST(
       cafeName: cafe.name,
       /** Faqat shu javobda — egaga aytish / nusxa olish uchun */
       password: body.password,
+      message:
+        "Yangi parol o‘rnatildi. Eski sessiyalar yopildi — egaga yangi kodni bering.",
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

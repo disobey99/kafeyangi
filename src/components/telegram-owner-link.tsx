@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, CircleHelp, Link2, Unlink } from "lucide-react";
 
 const BOT_HELP = [
-  "Tarif va sinov muddati haqida qisqa ma’lumot",
-  "Muddat tugashiga ~3 kun qolganda ogohlantirish",
-  "Skrinshot / rasm yuborish (matnli chat botda yo‘q)",
-  "Matnli support — faqat Platforma Support (sayt)",
-  "Parol tiklash havolasini Telegram orqali qayta olish",
+  "Bugungi savdo va muddatli savdo hisoboti",
+  "Bugun ishlayotgan / online xodimlar",
+  "Filiallar bo‘lsa — tanlash va alohida ko‘rish",
+  "Xodimlar bilan ichki chat (platforma Support emas)",
+  "Tarif eslatmasi va parol tiklash kodi (Telegram)",
 ];
 
 export function TelegramOwnerLink({ embedded = false }: { embedded?: boolean }) {

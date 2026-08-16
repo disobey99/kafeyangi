@@ -6,6 +6,7 @@ import { TelegramOwnerLink } from "@/components/telegram-owner-link";
 import { CafeBusinessSettings } from "@/components/cafe-business-settings";
 import { PaymentOfdSettings } from "@/components/payment-ofd-settings";
 import { SupportButton } from "@/components/support-button";
+import { OwnerPasswordSettings } from "@/components/owner-password-settings";
 
 export default async function SettingsPage({
   params,
@@ -27,6 +28,10 @@ export default async function SettingsPage({
         </div>
         <SupportButton cafeId={cafe.id} />
       </header>
+
+      <section id="account-password" className="dp-card scroll-mt-24 rounded-2xl p-6">
+        <OwnerPasswordSettings />
+      </section>
 
       <section className="dp-card rounded-2xl p-6">
         <DashboardThemePicker cafeId={cafe.id} />

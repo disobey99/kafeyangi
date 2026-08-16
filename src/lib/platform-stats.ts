@@ -22,51 +22,67 @@ export async function getPlatformStats() {
   const now = new Date();
   const monthStart = startOfMonth(now);
 
-  const cafes = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      name: string;
-      slug: string;
-      status: string;
-      plan: string;
-      region: string | null;
-      address: string | null;
-      phone: string | null;
-      subscriptionEndsAt: string | null;
-      trialEndsAt: string | null;
-      createdAt: string;
-      ownerName: string;
-      ownerEmail: string;
-    }>
-  >`
-    SELECT c.id, c.name, c.slug, c.status, c.plan, c.region, c.address, c.phone,
-           c.subscriptionEndsAt, c.trialEndsAt, c.createdAt,
-           u.name AS ownerName, u.email AS ownerEmail
-    FROM Cafe c
-    JOIN User u ON u.id = c.ownerId
-    ORDER BY c.createdAt DESC
-  `;
+  const cafeRows = await prisma.cafe.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      status: true,
+      plan: true,
+      region: true,
+      address: true,
+      phone: true,
+      subscriptionEndsAt: true,
+      trialEndsAt: true,
+      createdAt: true,
+      owner: { select: { name: true, email: true } },
+    },
+  });
 
-  const invoices = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      cafeId: string;
-      cafeName: string;
-      plan: string;
-      amount: number;
-      status: string;
-      paidAt: string | null;
-      periodEnd: string;
-      createdAt: string;
-    }>
-  >`
-    SELECT i.id, i.cafeId, c.name AS cafeName, i.plan, i.amount, i.status,
-           i.paidAt, i.periodEnd, i.createdAt
-    FROM BillingInvoice i
-    JOIN Cafe c ON c.id = i.cafeId
-    ORDER BY i.createdAt DESC
-    LIMIT 100
-  `;
+  const cafes = cafeRows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    status: c.status,
+    plan: c.plan,
+    region: c.region,
+    address: c.address,
+    phone: c.phone,
+    subscriptionEndsAt: c.subscriptionEndsAt?.toISOString() ?? null,
+    trialEndsAt: c.trialEndsAt?.toISOString() ?? null,
+    createdAt: c.createdAt.toISOString(),
+    ownerName: c.owner.name,
+    ownerEmail: c.owner.email,
+  }));
+
+  const invoiceRows = await prisma.billingInvoice.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    select: {
+      id: true,
+      cafeId: true,
+      plan: true,
+      amount: true,
+      status: true,
+      paidAt: true,
+      periodEnd: true,
+      createdAt: true,
+      cafe: { select: { name: true } },
+    },
+  });
+
+  const invoices = invoiceRows.map((i) => ({
+    id: i.id,
+    cafeId: i.cafeId,
+    cafeName: i.cafe.name,
+    plan: i.plan,
+    amount: i.amount,
+    status: i.status,
+    paidAt: i.paidAt?.toISOString() ?? null,
+    periodEnd: i.periodEnd.toISOString(),
+    createdAt: i.createdAt.toISOString(),
+  }));
 
   const activeCustomers = cafes.filter((c) => c.status === "ACTIVE" || c.status === "TRIAL");
   const payingCustomers = cafes.filter((c) => c.status === "ACTIVE");
@@ -82,7 +98,6 @@ export async function getPlatformStats() {
     return false;
   });
 
-  // MRR — faol (to'lovchi) mijozlar oylik tarif yig'indisi
   const mrrTiyin = payingCustomers.reduce((s, c) => s + planPriceTiyin(c.plan), 0);
 
   const paidThisMonth = invoices.filter(
@@ -117,7 +132,6 @@ export async function getPlatformStats() {
     .map(([region, v]) => ({ region, count: v.count, mrr: v.mrr }))
     .sort((a, b) => b.mrr - a.mrr || b.count - a.count);
 
-  // Oxirgi 6 oy MRR taxminiy (faol mijozlar * tarif; tarix yo'q bo'lsa hozirgi MRR asosida)
   const monthlyTrend = [];
   for (let i = 5; i >= 0; i--) {
     const start = monthsAgo(i);
@@ -130,9 +144,12 @@ export async function getPlatformStats() {
       return true;
     });
     const revenue = activeThen
-      .filter((c) => c.status === "ACTIVE" || (c.subscriptionEndsAt && new Date(c.subscriptionEndsAt) > start))
+      .filter(
+        (c) =>
+          c.status === "ACTIVE" ||
+          (c.subscriptionEndsAt && new Date(c.subscriptionEndsAt) > start),
+      )
       .reduce((s, c) => s + planPriceTiyin(c.plan), 0);
-    // Agar tarixiy ma'lumot kam bo'lsa, invoice PAID dan
     const paidInMonth = invoices
       .filter((inv) => {
         if (inv.status !== "PAID" || !inv.paidAt) return false;
@@ -142,7 +159,12 @@ export async function getPlatformStats() {
       .reduce((s, inv) => s + inv.amount, 0);
     monthlyTrend.push({
       label,
-      revenue: paidInMonth > 0 ? paidInMonth : i === 0 ? mrrTiyin : Math.round(revenue * (0.7 + (5 - i) * 0.05)),
+      revenue:
+        paidInMonth > 0
+          ? paidInMonth
+          : i === 0
+            ? mrrTiyin
+            : Math.round(revenue * (0.7 + (5 - i) * 0.05)),
     });
   }
 
@@ -223,7 +245,10 @@ export async function getPlatformStats() {
       monthRevenue: monthRevenueTiyin > 0 ? monthRevenueTiyin : mrrTiyin,
       pendingAmount,
       failedCount: failedInvoices.length,
-      avgPayment: avgPayment > 0 ? avgPayment : Math.round(mrrTiyin / Math.max(1, payingCustomers.length)),
+      avgPayment:
+        avgPayment > 0
+          ? avgPayment
+          : Math.round(mrrTiyin / Math.max(1, payingCustomers.length)),
     },
     byPlan,
     byRegion,

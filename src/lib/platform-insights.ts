@@ -39,80 +39,154 @@ function dayStart(offsetDays = 0) {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() + offsetDays);
-  return d.toISOString();
+  return d;
 }
 
 export async function getPlatformCafeInsights() {
-  const cafes = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      name: string;
-      slug: string;
-      status: string;
-      plan: string;
-      region: string | null;
-      todayRevenue: number | bigint;
-      yesterdayRevenue: number | bigint;
-      weekRevenue: number | bigint;
-      todayOrders: number | bigint;
-    }>
-  >`
-    SELECT c.id, c.name, c.slug, c.status, c.plan, c.region,
-      (SELECT COALESCE(SUM(o.totalAmount), 0) FROM "Order" o
-       WHERE o.cafeId = c.id AND o.status = 'DELIVERED'
-       AND datetime(o.createdAt) >= datetime(${dayStart(0)})) AS todayRevenue,
-      (SELECT COALESCE(SUM(o.totalAmount), 0) FROM "Order" o
-       WHERE o.cafeId = c.id AND o.status = 'DELIVERED'
-       AND datetime(o.createdAt) >= datetime(${dayStart(-1)})
-       AND datetime(o.createdAt) < datetime(${dayStart(0)})) AS yesterdayRevenue,
-      (SELECT COALESCE(SUM(o.totalAmount), 0) FROM "Order" o
-       WHERE o.cafeId = c.id AND o.status = 'DELIVERED'
-       AND datetime(o.createdAt) >= datetime(${dayStart(-6)})) AS weekRevenue,
-      (SELECT COUNT(*) FROM "Order" o
-       WHERE o.cafeId = c.id AND o.status = 'DELIVERED'
-       AND datetime(o.createdAt) >= datetime(${dayStart(0)})) AS todayOrders
-    FROM Cafe c
-    WHERE c.status IN ('ACTIVE', 'TRIAL', 'SUSPENDED')
-    ORDER BY todayRevenue DESC, c.name ASC
-  `;
+  const today0 = dayStart(0);
+  const yesterday0 = dayStart(-1);
+  const week0 = dayStart(-6);
+
+  const cafeList = await prisma.cafe.findMany({
+    where: { status: { in: ["ACTIVE", "TRIAL", "SUSPENDED"] } },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      status: true,
+      plan: true,
+      region: true,
+      telegramChatId: true,
+      groupId: true,
+      paymeEnabled: true,
+    },
+    orderBy: { name: "asc" },
+  });
+
+  const cafeIds = cafeList.map((c) => c.id);
+
+  const deliveredOrders =
+    cafeIds.length === 0
+      ? []
+      : await prisma.order.findMany({
+          where: {
+            cafeId: { in: cafeIds },
+            status: "DELIVERED",
+            createdAt: { gte: week0 },
+          },
+          select: {
+            cafeId: true,
+            totalAmount: true,
+            createdAt: true,
+            source: true,
+          },
+        });
+
+  const revenueByCafe = new Map<
+    string,
+    { today: number; yesterday: number; week: number; todayOrders: number }
+  >();
+  for (const id of cafeIds) {
+    revenueByCafe.set(id, { today: 0, yesterday: 0, week: 0, todayOrders: 0 });
+  }
+  for (const o of deliveredOrders) {
+    const row = revenueByCafe.get(o.cafeId);
+    if (!row) continue;
+    row.week += o.totalAmount;
+    if (o.createdAt >= today0) {
+      row.today += o.totalAmount;
+      row.todayOrders += 1;
+    } else if (o.createdAt >= yesterday0 && o.createdAt < today0) {
+      row.yesterday += o.totalAmount;
+    }
+  }
+
+  const cafes = cafeList
+    .map((c) => {
+      const r = revenueByCafe.get(c.id)!;
+      return {
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        status: c.status,
+        plan: c.plan,
+        region: c.region,
+        todayRevenue: r.today,
+        yesterdayRevenue: r.yesterday,
+        weekRevenue: r.week,
+        todayOrders: r.todayOrders,
+      };
+    })
+    .sort((a, b) => b.todayRevenue - a.todayRevenue || a.name.localeCompare(b.name));
 
   const totalCafes = cafes.length || 1;
 
-  const featureCounts = await Promise.all([
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(DISTINCT c.id) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND EXISTS (SELECT 1 FROM "Order" o WHERE o.cafeId = c.id AND o.source = 'QR_TABLE')`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(DISTINCT c.id) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND EXISTS (SELECT 1 FROM "Order" o WHERE o.cafeId = c.id AND o.source = 'ONLINE')`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(DISTINCT c.id) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND EXISTS (SELECT 1 FROM "Order" o WHERE o.cafeId = c.id AND o.source = 'WAITER')`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(DISTINCT c.id) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND EXISTS (SELECT 1 FROM LoyaltyCustomer lc WHERE lc.cafeId = c.id)`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(*) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND c.telegramChatId IS NOT NULL AND c.telegramChatId != ''`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(DISTINCT c.id) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED')
-      AND EXISTS (SELECT 1 FROM Promotion p WHERE p.cafeId = c.id)`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(*) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED') AND c.groupId IS NOT NULL`,
-    prisma.$queryRaw<Array<{ c: number | bigint }>>`
-      SELECT COUNT(*) AS c FROM Cafe c
-      WHERE c.status IN ('ACTIVE','TRIAL','SUSPENDED') AND c.paymeEnabled = 1`,
+  const [
+    qrCount,
+    onlineCount,
+    waiterCount,
+    loyaltyCount,
+    promoCount,
+  ] = await Promise.all([
+    prisma.order
+      .findMany({
+        where: {
+          cafeId: { in: cafeIds },
+          source: "QR_TABLE",
+        },
+        distinct: ["cafeId"],
+        select: { cafeId: true },
+      })
+      .then((r) => r.length),
+    prisma.order
+      .findMany({
+        where: { cafeId: { in: cafeIds }, source: "ONLINE" },
+        distinct: ["cafeId"],
+        select: { cafeId: true },
+      })
+      .then((r) => r.length),
+    prisma.order
+      .findMany({
+        where: { cafeId: { in: cafeIds }, source: "WAITER" },
+        distinct: ["cafeId"],
+        select: { cafeId: true },
+      })
+      .then((r) => r.length),
+    prisma.loyaltyCustomer
+      .findMany({
+        where: { cafeId: { in: cafeIds } },
+        distinct: ["cafeId"],
+        select: { cafeId: true },
+      })
+      .then((r) => r.length),
+    prisma.promotion
+      .findMany({
+        where: { cafeId: { in: cafeIds } },
+        distinct: ["cafeId"],
+        select: { cafeId: true },
+      })
+      .then((r) => r.length),
   ]);
 
+  const telegramCount = cafeList.filter(
+    (c) => c.telegramChatId && c.telegramChatId.length > 0,
+  ).length;
+  const branchCount = cafeList.filter((c) => c.groupId != null).length;
+  const paymeCount = cafeList.filter((c) => c.paymeEnabled).length;
+
+  const counts = [
+    qrCount,
+    onlineCount,
+    waiterCount,
+    loyaltyCount,
+    telegramCount,
+    promoCount,
+    branchCount,
+    paymeCount,
+  ];
+
   const featureUsage: FeatureUsage[] = FEATURES.map((feature, i) => {
-    const usedCount = Number(featureCounts[i][0]?.c ?? 0);
+    const usedCount = counts[i] ?? 0;
     return {
       key: feature.key,
       label: feature.label,
@@ -125,8 +199,8 @@ export async function getPlatformCafeInsights() {
   featureUsage.sort((a, b) => b.adoptionPercent - a.adoptionPercent);
 
   const cafeRows: CafeInsightRow[] = cafes.map((c) => {
-    const today = Number(c.todayRevenue);
-    const yesterday = Number(c.yesterdayRevenue);
+    const today = c.todayRevenue;
+    const yesterday = c.yesterdayRevenue;
     let trend: "up" | "down" | "flat" = "flat";
     let trendPercent = 0;
     if (yesterday > 0) {
@@ -147,8 +221,8 @@ export async function getPlatformCafeInsights() {
       region: c.region,
       todayRevenue: today,
       yesterdayRevenue: yesterday,
-      weekRevenue: Number(c.weekRevenue),
-      todayOrders: Number(c.todayOrders),
+      weekRevenue: c.weekRevenue,
+      todayOrders: c.todayOrders,
       trend,
       trendPercent,
     };
